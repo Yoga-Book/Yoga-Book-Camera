@@ -92,6 +92,14 @@ application. The service observes which endpoint the application keeps open
 and switches the single physical AtomISP pipeline automatically. The front
 camera is the default until an application selects the rear camera.
 
+The browser-facing endpoints remain discoverable while unused, but the raw
+sensor, AtomISP and image-processing pipelines stop after three seconds with
+no external camera client. Opening either endpoint resumes processing. A
+thermal gate stops processing at 85 C and does not restart it until the
+hottest valid system thermal-zone reading is at or below 75 C. The systemd
+unit additionally caps the processor at 175% CPU, 384 MiB memory and 64 tasks,
+with low scheduling weight so camera work cannot monopolize the tablet.
+
 The diagnostic controller performs the same in-place handoff without
 restarting the browser-facing endpoints:
 

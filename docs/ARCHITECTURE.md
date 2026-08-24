@@ -94,6 +94,19 @@ Before a planned processor stop, systemd clears `keep_format`; otherwise the
 loopback can retain capture-only state after the writer exits and reject the
 next writer even when no browser has the node open.
 
+The loopback writers remain open but paused when no external process holds
+either capture endpoint. After a three-second debounce, the service stops the
+physical AtomISP capture and the expensive Bayer, denoise and color pipelines.
+Opening either loopback resumes them before frame delivery, preserving normal
+browser discovery without continuously spending approximately two Atom cores.
+
+Resource safety is layered. The service stops processing if any plausible
+system thermal-zone reading reaches 85 C and uses a 10 C hysteresis before
+resuming. Its systemd cgroup caps CPU at 175%, memory at 384 MiB and tasks at
+64, assigns a low CPU weight and limits restart storms. Kernel thermal
+protection remains authoritative; the userspace gate prevents this optional
+camera workload from reaching that last-resort boundary during normal use.
+
 The front and rear cameras share one AtomISP capture node. Sensor selection is
 therefore serialized; it is not safe to run two physical capture producers at
 once. A debounced monitor ignores short enumeration probes and switches only

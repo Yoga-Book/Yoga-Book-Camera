@@ -56,8 +56,21 @@ The repository implementation has run continuously on the physical tablet:
 - grey-world AWB converged to the warm-neutral reference ratios
   `R/G=1.115`, `B/G=0.875`;
 - both continuous raw tests completed without AtomISP/CSS/kernel errors;
-- front processing used about 1.3 Atom cores after reducing the statistics
-  branch to 2 fps; rear processing used about 1.1 cores in a bounded run.
+- A later no-client profile exposed an unacceptable regression: the complete
+  front pipeline stayed active at 183-200% CPU, raised the PNIT thermal zone
+  to 79 C and could contend with desktop audio. Version 0.2.13 keeps both
+  browser endpoints visible but closes `/dev/video0` and suspends processing
+  after three idle seconds. Event-driven client tracking plus a slow idle
+  thermal poll reduced a final 20-second physical sample to 0.41% service CPU;
+  PNIT cooled to 51-53 C.
+- A bounded 300-frame front capture resumed automatically, completed at
+  approximately 25-30 fps, respected the live 175% CPU cgroup ceiling and
+  returned to idle without a service restart. A concurrent finite 10-second
+  PipeWire playback stream and the camera capture both exited successfully,
+  with no new SOF, IPC, XRUN, underrun or overrun message.
+- From the fully idle state, a final 30-frame front open completed in 0.92
+  seconds and returned to idle automatically. This direct transport check does
+  not replace a physical Google Meet image and switching acceptance pass.
 - full-resolution 3248x2432 rear BGGR10 capture, one-shot focus movement and
   JPEG encoding have completed on the physical tablet;
 - the OV8858 synthetic pattern produces clean full-scale white, yellow, cyan,

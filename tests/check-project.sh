@@ -126,6 +126,9 @@ grep -Fq 'Type=notify' "$root/systemd/yogabook-camera.service"
 grep -Fq 'User=1000' "$root/systemd/yogabook-camera.service"
 grep -Fq 'SupplementaryGroups=video render' "$root/systemd/yogabook-camera.service"
 grep -Fq 'Before=display-manager.service' "$root/systemd/yogabook-camera.service"
+grep -Fq 'CPUQuota=175%' "$root/systemd/yogabook-camera.service"
+grep -Fq 'MemoryMax=384M' "$root/systemd/yogabook-camera.service"
+grep -Fq 'TasksMax=64' "$root/systemd/yogabook-camera.service"
 grep -Fq 'ExecStop=-/usr/bin/v4l2-ctl -d /dev/video10 --set-ctrl=keep_format=0' \
 	"$root/systemd/yogabook-camera.service"
 grep -Fq 'ExecStop=-/usr/bin/v4l2-ctl -d /dev/video11 --set-ctrl=keep_format=0' \
@@ -137,6 +140,9 @@ grep -Fq 'ExecStartPre=-/usr/bin/v4l2-ctl -d /dev/video11 --set-ctrl=keep_format
 grep -Fq 'os.kill(service_pid(), signal.SIGUSR2)' "$root/src/yogabook_camera_control.py"
 grep -Fq 'os.kill(current_pid, signal.SIGHUP)' "$root/src/yogabook_camera_control.py"
 grep -Fq 'CameraSelectionMonitor(arguments.switch_dwell)' "$root/src/yogabook_camera.py"
+grep -Fq 'CameraActivityMonitor(' "$root/src/yogabook_camera.py"
+grep -Fq 'temperature=hottest_temperature_celsius()' "$root/src/yogabook_camera.py"
+grep -Fq 'self._pause_streaming(reason)' "$root/src/yogabook_camera.py"
 grep -Fq 'intervideosink name=browser_bridge channel=yogabook-camera sync=false' \
 	"$root/src/yogabook_camera.py"
 grep -Fq 'intervideosrc channel=yogabook-camera' "$root/src/yogabook_camera.py"

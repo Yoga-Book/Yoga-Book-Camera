@@ -24,6 +24,13 @@ image-quality acceptance.
   boots.
 - A 30-minute meeting stream maintains frame delivery, bounded memory and
   usable audio on the same device.
+- With no application holding either endpoint, physical capture becomes idle
+  within five seconds and sustained service CPU remains below 5%.
+- Active camera processing stays inside its 175% CPU, 384 MiB memory and
+  64-task cgroup limits without starving audio or desktop input.
+- A simulated thermal-zone reading at 85 C suspends capture, no automatic
+  restart occurs above 75 C, and capture resumes after the reading cools to
+  75 C or below while a client remains open.
 
 ## Front OV2740 physical gates
 

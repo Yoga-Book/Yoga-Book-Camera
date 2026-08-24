@@ -1,3 +1,11 @@
+yogabook-camera (0.2.13) unstable; urgency=medium
+
+  * Suspend raw capture and image processing while no camera client is open.
+  * Stop camera processing at 85 C and require 75 C before resuming.
+  * Bound camera CPU, memory, task count and restart rate under systemd.
+
+ -- Yoga Book Linux Project <noreply@github.com>  Mon, 24 Aug 2026 22:20:00 +0200
+
 yogabook-camera (0.2.12) unstable; urgency=medium
 
   * Clarify the kernel/runtime contract and camera validation boundary.

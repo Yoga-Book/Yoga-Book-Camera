@@ -6,16 +6,22 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import select
 import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
 from yogabook_camera import (
+    CameraActivityMonitor,
+    CameraClientMonitor,
     CameraSelectionMonitor,
     command_when_available,
     configure_hardware,
     discover_sensor_subdevice,
+    ensure_safe_start_temperature,
+    externally_open_cameras,
+    hottest_temperature_celsius,
     is_white_balance_candidate,
     lock_loopback_format,
     load_config,
@@ -56,6 +62,21 @@ class CameraConfigurationTests(unittest.TestCase):
         config = Path(__file__).resolve().parents[1] / "config" / "cameras.json"
         self.assertEqual(load_config(config, "front")["sensor"], "ov2740")
         self.assertEqual(load_config(config, "rear")["sensor"], "ov8858")
+
+    def test_external_camera_open_is_detected_by_descriptor_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            proc_root = Path(temporary)
+            descriptors = proc_root / "123" / "fd"
+            descriptors.mkdir(parents=True)
+            (descriptors / "5").symlink_to("/dev/null")
+            self.assertEqual(
+                externally_open_cameras(
+                    {"front": "/dev/null"},
+                    proc_root=proc_root,
+                    own_pid=999,
+                ),
+                {"front"},
+            )
 
     @patch("yogabook_camera.time.sleep")
     @patch("yogabook_camera.command")
@@ -217,6 +238,98 @@ class CameraSelectionMonitorTests(unittest.TestCase):
         monitor = CameraSelectionMonitor(1.0)
         self.assertIsNone(monitor.update({"front"}, "front", 40.0))
         self.assertIsNone(monitor.update({"front"}, "front", 42.0))
+
+
+class CameraActivityMonitorTests(unittest.TestCase):
+    def monitor(self) -> CameraActivityMonitor:
+        return CameraActivityMonitor(
+            idle_delay=3.0,
+            max_temperature=85.0,
+            resume_temperature=75.0,
+        )
+
+    def test_streaming_stops_after_idle_delay(self) -> None:
+        monitor = self.monitor()
+        self.assertEqual(
+            monitor.update(opened=set(), streaming=True, temperature=60.0, now=10.0),
+            (None, None),
+        )
+        self.assertEqual(
+            monitor.update(opened=set(), streaming=True, temperature=60.0, now=13.0),
+            (False, "no camera clients"),
+        )
+
+    def test_open_client_resumes_idle_camera(self) -> None:
+        monitor = self.monitor()
+        self.assertEqual(
+            monitor.update(opened={"front"}, streaming=False, temperature=60.0, now=20.0),
+            (True, "camera client opened"),
+        )
+
+    def test_thermal_limit_stops_streaming_immediately(self) -> None:
+        monitor = self.monitor()
+        self.assertEqual(
+            monitor.update(opened={"front"}, streaming=True, temperature=85.0, now=30.0),
+            (False, "thermal limit"),
+        )
+
+    def test_thermal_hysteresis_prevents_rapid_restart(self) -> None:
+        monitor = self.monitor()
+        monitor.update(opened={"front"}, streaming=True, temperature=86.0, now=40.0)
+        self.assertEqual(
+            monitor.update(opened={"front"}, streaming=False, temperature=80.0, now=41.0),
+            (None, None),
+        )
+        self.assertEqual(
+            monitor.update(opened={"front"}, streaming=False, temperature=75.0, now=42.0),
+            (True, "camera client opened"),
+        )
+
+    def test_invalid_temperature_hysteresis_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must be below"):
+            CameraActivityMonitor(3.0, 80.0, 80.0)
+
+
+class CameraClientMonitorTests(unittest.TestCase):
+    def test_open_and_close_events_track_external_client(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            endpoint = Path(temporary) / "camera"
+            endpoint.touch()
+            monitor = CameraClientMonitor({"front": str(endpoint)})
+            try:
+                with endpoint.open(encoding="utf-8"):
+                    self.assertTrue(select.select([monitor.descriptor], [], [], 1.0)[0])
+                    self.assertFalse(monitor.consume())
+                    self.assertEqual(monitor.opened, {"front"})
+                self.assertTrue(select.select([monitor.descriptor], [], [], 1.0)[0])
+                self.assertFalse(monitor.consume())
+                self.assertEqual(monitor.opened, set())
+            finally:
+                monitor.close()
+
+
+class ThermalReadingTests(unittest.TestCase):
+    def test_invalid_firmware_zones_are_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            readings = (0, -273150, 63250, 79000, 160000)
+            for index, reading in enumerate(readings):
+                zone = root / f"thermal_zone{index}"
+                zone.mkdir()
+                (zone / "temp").write_text(f"{reading}\n", encoding="ascii")
+            self.assertEqual(hottest_temperature_celsius(root), 79.0)
+
+    def test_no_valid_temperature_returns_none(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            self.assertIsNone(hottest_temperature_celsius(Path(temporary)))
+
+    def test_hot_start_is_rejected(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "refusing to start"):
+            ensure_safe_start_temperature(85.0, 85.0)
+
+    def test_cool_or_unknown_start_is_allowed(self) -> None:
+        ensure_safe_start_temperature(84.9, 85.0)
+        ensure_safe_start_temperature(None, 85.0)
 
 
 class RearStillCaptureTests(unittest.TestCase):

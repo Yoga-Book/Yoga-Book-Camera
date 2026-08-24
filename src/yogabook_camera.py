@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import gc
 import json
 import os
@@ -12,8 +13,8 @@ from pathlib import Path
 import re
 import signal
 import socket
-import stat
 import subprocess
+import struct
 import sys
 import time
 from typing import Any
@@ -28,6 +29,18 @@ DEFAULT_CONFIG_PATHS = (
     Path("/etc/yogabook-camera/cameras.json"),
     Path(__file__).resolve().parents[1] / "config" / "cameras.json",
 )
+
+ACTIVE_POLL_INTERVAL_MS = 1000
+IDLE_POLL_INTERVAL_MS = 5000
+DEFAULT_IDLE_DELAY_SECONDS = 3.0
+DEFAULT_MAX_TEMPERATURE_CELSIUS = 85.0
+DEFAULT_RESUME_TEMPERATURE_CELSIUS = 75.0
+DEFAULT_THERMAL_ROOT = Path("/sys/class/thermal")
+IN_CLOSE_WRITE = 0x00000008
+IN_CLOSE_NOWRITE = 0x00000010
+IN_OPEN = 0x00000020
+IN_Q_OVERFLOW = 0x00004000
+INOTIFY_EVENT = struct.Struct("iIII")
 
 FRONT_FRAGMENT_SHADER = r"""
 precision mediump float;
@@ -93,6 +106,24 @@ def parse_arguments() -> argparse.Namespace:
         type=float,
         default=1.0,
         help="seconds a single virtual camera must remain open before switching",
+    )
+    parser.add_argument(
+        "--idle-delay",
+        type=float,
+        default=DEFAULT_IDLE_DELAY_SECONDS,
+        help="seconds without a camera client before suspending image processing",
+    )
+    parser.add_argument(
+        "--max-temperature",
+        type=float,
+        default=DEFAULT_MAX_TEMPERATURE_CELSIUS,
+        help="highest system temperature allowed while camera processing is active",
+    )
+    parser.add_argument(
+        "--resume-temperature",
+        type=float,
+        default=DEFAULT_RESUME_TEMPERATURE_CELSIUS,
+        help="temperature below which a thermally suspended camera may resume",
     )
     parser.add_argument("--no-auto", action="store_true", help="disable adaptive tone and white balance")
     parser.add_argument("--print-pipeline", action="store_true")
@@ -161,9 +192,11 @@ def externally_open_cameras(
     """Return camera endpoints held open outside the processor itself."""
     if own_pid is None:
         own_pid = os.getpid()
-    device_numbers = {
-        os.stat(device).st_rdev: camera for camera, device in devices.items()
+    device_paths = {
+        str(Path(device).resolve(strict=True)): camera
+        for camera, device in devices.items()
     }
+    own_uid = os.getuid()
     opened: set[str] = set()
     try:
         processes = tuple(proc_root.iterdir())
@@ -173,20 +206,198 @@ def externally_open_cameras(
         if not process.name.isdecimal() or int(process.name) == own_pid:
             continue
         try:
+            if process.stat().st_uid != own_uid:
+                continue
+        except OSError:
+            continue
+        try:
             descriptors = tuple((process / "fd").iterdir())
         except OSError:
             continue
         for descriptor in descriptors:
             try:
-                descriptor_status = descriptor.stat()
+                target = os.readlink(descriptor)
             except OSError:
                 continue
-            if not stat.S_ISCHR(descriptor_status.st_mode):
-                continue
-            camera = device_numbers.get(descriptor_status.st_rdev)
+            camera = device_paths.get(target)
             if camera:
                 opened.add(camera)
     return opened
+
+
+class CameraClientMonitor:
+    """Track loopback clients from inotify open/close events."""
+
+    def __init__(self, devices: dict[str, str]):
+        libc = ctypes.CDLL(None, use_errno=True)
+        descriptor = libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
+        if descriptor < 0:
+            error = ctypes.get_errno()
+            raise OSError(error, os.strerror(error))
+        self.descriptor = descriptor
+        self.source_id: int | None = None
+        self.cameras_by_watch: dict[int, str] = {}
+        self.open_counts = {camera: 0 for camera in devices}
+        try:
+            for camera, device in devices.items():
+                watch = libc.inotify_add_watch(
+                    descriptor,
+                    os.fsencode(device),
+                    IN_OPEN | IN_CLOSE_WRITE | IN_CLOSE_NOWRITE,
+                )
+                if watch < 0:
+                    error = ctypes.get_errno()
+                    raise OSError(error, f"cannot watch {device}: {os.strerror(error)}")
+                self.cameras_by_watch[watch] = camera
+        except Exception:
+            os.close(descriptor)
+            raise
+
+    @property
+    def opened(self) -> set[str]:
+        return {
+            camera
+            for camera, count in self.open_counts.items()
+            if count > 0
+        }
+
+    def reset(self, opened: set[str]) -> None:
+        self.open_counts = {
+            camera: int(camera in opened)
+            for camera in self.open_counts
+        }
+
+    def consume(self, *, discard: bool = False) -> bool:
+        """Consume queued events and report whether the queue overflowed."""
+        overflowed = False
+        while True:
+            try:
+                payload = os.read(self.descriptor, 4096)
+            except BlockingIOError:
+                break
+            if not payload:
+                break
+            offset = 0
+            while offset + INOTIFY_EVENT.size <= len(payload):
+                watch, mask, _cookie, name_length = INOTIFY_EVENT.unpack_from(
+                    payload,
+                    offset,
+                )
+                offset += INOTIFY_EVENT.size + name_length
+                if mask & IN_Q_OVERFLOW:
+                    overflowed = True
+                    continue
+                if discard:
+                    continue
+                camera = self.cameras_by_watch.get(watch)
+                if camera is None:
+                    continue
+                if mask & IN_OPEN:
+                    self.open_counts[camera] += 1
+                if mask & (IN_CLOSE_WRITE | IN_CLOSE_NOWRITE):
+                    self.open_counts[camera] = max(
+                        0,
+                        self.open_counts[camera] - 1,
+                    )
+        return overflowed
+
+    def attach(self, callback: Any) -> None:
+        self.source_id = GLib.io_add_watch(
+            self.descriptor,
+            GLib.IO_IN | GLib.IO_ERR | GLib.IO_HUP,
+            callback,
+        )
+
+    def close(self) -> None:
+        if self.source_id is not None:
+            GLib.source_remove(self.source_id)
+            self.source_id = None
+        os.close(self.descriptor)
+
+
+def hottest_temperature_celsius(
+    thermal_root: Path = DEFAULT_THERMAL_ROOT,
+) -> float | None:
+    """Return the hottest plausible thermal-zone reading.
+
+    Some Cherry Trail firmware exposes disconnected zones as zero or absolute
+    zero. Ignore those values instead of disabling the thermal safety gate.
+    """
+    temperatures: list[float] = []
+    try:
+        zones = tuple(thermal_root.glob("thermal_zone*/temp"))
+    except OSError:
+        return None
+    for temperature_path in zones:
+        try:
+            millidegrees = int(temperature_path.read_text(encoding="ascii").strip())
+        except (OSError, ValueError):
+            continue
+        if 0 < millidegrees < 150_000:
+            temperatures.append(millidegrees / 1000)
+    return max(temperatures, default=None)
+
+
+def ensure_safe_start_temperature(
+    temperature: float | None,
+    maximum: float,
+) -> None:
+    if temperature is not None and temperature >= maximum:
+        raise RuntimeError(
+            f"refusing to start camera processing at {temperature:.1f} C"
+        )
+
+
+class CameraActivityMonitor:
+    """Choose streaming transitions from clients, idle time and temperature."""
+
+    def __init__(
+        self,
+        idle_delay: float,
+        max_temperature: float,
+        resume_temperature: float,
+    ):
+        if idle_delay < 0:
+            raise ValueError("camera idle delay cannot be negative")
+        if resume_temperature >= max_temperature:
+            raise ValueError("camera resume temperature must be below its maximum")
+        self.idle_delay = idle_delay
+        self.max_temperature = max_temperature
+        self.resume_temperature = resume_temperature
+        self.idle_since: float | None = None
+        self.thermal_blocked = False
+
+    def update(
+        self,
+        *,
+        opened: set[str],
+        streaming: bool,
+        temperature: float | None,
+        now: float,
+    ) -> tuple[bool | None, str | None]:
+        if temperature is not None:
+            if temperature >= self.max_temperature:
+                self.thermal_blocked = True
+            elif self.thermal_blocked and temperature <= self.resume_temperature:
+                self.thermal_blocked = False
+
+        if self.thermal_blocked:
+            self.idle_since = None
+            if streaming:
+                return False, "thermal limit"
+            return None, None
+
+        if opened:
+            self.idle_since = None
+            if not streaming:
+                return True, "camera client opened"
+            return None, None
+
+        if self.idle_since is None:
+            self.idle_since = now
+        if streaming and now - self.idle_since >= self.idle_delay:
+            return False, "no camera clients"
+        return None, None
 
 
 class CameraSelectionMonitor:
@@ -385,6 +596,9 @@ class CameraPipeline:
         self.still_pending = False
         self.ready_reported = False
         self.output_started = False
+        self.streaming = False
+        self.client_monitor: CameraClientMonitor | None = None
+        self.activity_source_id: int | None = None
         self.published_camera: str | None = None
         self.switching = False
         self.sensor_device = sensor_device
@@ -393,6 +607,11 @@ class CameraPipeline:
             "rear": arguments.rear_output_device,
         }
         self.selection_monitor = CameraSelectionMonitor(arguments.switch_dwell)
+        self.activity_monitor = CameraActivityMonitor(
+            arguments.idle_delay,
+            arguments.max_temperature,
+            arguments.resume_temperature,
+        )
         self.sensor_controls = {
             name: int(value) for name, value in profile.get("sensor_controls", {}).items()
         }
@@ -587,42 +806,79 @@ class CameraPipeline:
         if result == Gst.StateChangeReturn.FAILURE:
             raise RuntimeError("image processing failed to enter PLAYING")
 
+    def _pause_streaming(self, reason: str) -> None:
+        if not self.streaming:
+            return
+        self.output.set_state(Gst.State.PAUSED)
+        failure: Exception | None = None
+        try:
+            self._destroy_capture()
+        except Exception as error:
+            failure = error
+        try:
+            self._stop_processing()
+        except Exception as error:
+            if failure is None:
+                failure = error
+        finally:
+            self.streaming = False
+        notify_systemd(f"STATUS=Camera idle: {reason}")
+        print(f"CAMERA_IDLE reason={reason}", flush=True)
+        if failure is not None:
+            raise failure
+
+    def _resume_streaming(self, reason: str) -> None:
+        if self.streaming:
+            return
+        try:
+            self.sensor_device = configure_hardware(
+                self.arguments.capture_device,
+                self.arguments.media_device,
+                self.profile,
+            )
+            self.sensor_controls = {
+                name: int(value)
+                for name, value in self.profile.get("sensor_controls", {}).items()
+            }
+            self._start_processing()
+            self._start_capture()
+            result = self.output.set_state(Gst.State.PLAYING)
+            if result == Gst.StateChangeReturn.FAILURE:
+                raise RuntimeError("browser output failed to resume")
+        except Exception:
+            self.output.set_state(Gst.State.PAUSED)
+            self._destroy_capture()
+            self._stop_processing()
+            raise
+        self.streaming = True
+        notify_systemd("STATUS=Corrected camera frames are available")
+        print(f"CAMERA_ACTIVE reason={reason}", flush=True)
+
     def _switch_camera(self, camera: str) -> None:
         if camera == self.arguments.camera or self.switching or self.still_pending:
             return
         old_camera = self.arguments.camera
         old_profile = self.profile
         profile = load_config(self.arguments.config, camera)
+        was_streaming = self.streaming
         self.switching = True
         print(f"CAMERA_SWITCH requested={camera} previous={old_camera}", flush=True)
         try:
-            self._destroy_capture()
-            self._stop_processing()
-            sensor_device = configure_hardware(
-                self.arguments.capture_device,
-                self.arguments.media_device,
-                profile,
-            )
+            if was_streaming:
+                self._pause_streaming("switching camera")
             self._apply_profile(camera, profile)
-            self.sensor_device = sensor_device
-            self._start_processing()
-            self._start_capture()
+            if was_streaming:
+                self._resume_streaming("camera switched")
             persist_camera(camera)
             print(f"CAMERA_SWITCH active={camera}", flush=True)
         except Exception as error:
             print(f"ERROR: camera switch to {camera} failed: {error}", file=sys.stderr, flush=True)
             try:
-                self._destroy_capture()
-                self._stop_processing()
-                sensor_device = configure_hardware(
-                    self.arguments.capture_device,
-                    self.arguments.media_device,
-                    old_profile,
-                )
+                if self.streaming:
+                    self._pause_streaming("restoring camera")
                 self._apply_profile(old_camera, old_profile)
-                self.sensor_device = sensor_device
-                self._start_processing()
-                self._start_capture()
+                if was_streaming:
+                    self._resume_streaming("camera restored")
                 persist_camera(old_camera)
                 print(f"CAMERA_SWITCH restored={old_camera}", flush=True)
             except Exception as restore_error:
@@ -636,17 +892,83 @@ class CameraPipeline:
             self.switching = False
 
     def _monitor_camera_selection(self) -> bool:
+        self.activity_source_id = None
+        opened: set[str] = set()
         try:
-            opened = externally_open_cameras(self.output_devices)
+            if self.client_monitor is None:
+                opened = externally_open_cameras(self.output_devices)
+            else:
+                opened = self.client_monitor.opened
+            now = time.monotonic()
+            transition, reason = self.activity_monitor.update(
+                opened=opened,
+                streaming=self.streaming,
+                temperature=hottest_temperature_celsius(),
+                now=now,
+            )
+            if transition is False and reason:
+                self._pause_streaming(reason)
+            elif transition is True and reason:
+                self._resume_streaming(reason)
             requested = self.selection_monitor.update(
                 opened,
                 self.arguments.camera,
-                time.monotonic(),
+                now,
             )
             if requested:
                 self._switch_camera(requested)
         except Exception as error:
             print(f"WARN: cannot inspect browser camera selection: {error}", file=sys.stderr)
+        interval = (
+            ACTIVE_POLL_INTERVAL_MS
+            if self.streaming or opened
+            else IDLE_POLL_INTERVAL_MS
+        )
+        self._schedule_activity_monitor(interval)
+        return GLib.SOURCE_REMOVE
+
+    def _schedule_activity_monitor(self, delay_ms: int) -> None:
+        if self.activity_source_id is not None:
+            GLib.source_remove(self.activity_source_id)
+        self.activity_source_id = GLib.timeout_add(
+            max(delay_ms, 1),
+            self._monitor_camera_selection,
+        )
+
+    def _initialize_client_monitor(self) -> bool:
+        if self.client_monitor is not None:
+            return GLib.SOURCE_REMOVE
+        try:
+            monitor = CameraClientMonitor(self.output_devices)
+            initial_opened = externally_open_cameras(self.output_devices)
+            monitor.consume(discard=True)
+            monitor.reset(initial_opened)
+            monitor.attach(self._camera_client_event)
+            self.client_monitor = monitor
+        except Exception as error:
+            print(
+                f"WARN: cannot monitor camera clients with inotify: {error}",
+                file=sys.stderr,
+                flush=True,
+            )
+        return GLib.SOURCE_REMOVE
+
+    def _camera_client_event(
+        self,
+        _descriptor: int,
+        condition: GLib.IOCondition,
+    ) -> bool:
+        monitor = self.client_monitor
+        if monitor is None:
+            return GLib.SOURCE_REMOVE
+        if condition & GLib.IO_IN:
+            if monitor.consume():
+                monitor.reset(externally_open_cameras(self.output_devices))
+            self._schedule_activity_monitor(1)
+        if condition & (GLib.IO_ERR | GLib.IO_HUP):
+            monitor.close()
+            self.client_monitor = None
+            return GLib.SOURCE_REMOVE
         return GLib.SOURCE_CONTINUE
 
     def request_configured_camera(self, _signal: int, _frame: object) -> None:
@@ -697,6 +1019,7 @@ class CameraPipeline:
                 lock_loopback_format(output_device)
             notify_systemd("READY=1\nSTATUS=Corrected camera frames are available")
             self.ready_reported = True
+            GLib.idle_add(self._initialize_client_monitor)
         luminance: list[float] = []
         valid_r = valid_g = valid_b = 0.0
         valid_count = 0
@@ -807,6 +1130,7 @@ class CameraPipeline:
             if self.capture is None:
                 raise RuntimeError("physical capture pipeline is missing")
             self.capture.set_state(Gst.State.PLAYING)
+            self.streaming = True
             deadline = time.monotonic() + 10
             while self.browser_bridge.get_property("last-sample") is None:
                 if time.monotonic() >= deadline:
@@ -814,14 +1138,21 @@ class CameraPipeline:
                 time.sleep(0.05)
             self.output.set_state(Gst.State.PLAYING)
             self.output_started = True
-            GLib.timeout_add(500, self._monitor_camera_selection)
+            self._schedule_activity_monitor(ACTIVE_POLL_INTERVAL_MS)
             self.loop.run()
         finally:
+            if self.activity_source_id is not None:
+                GLib.source_remove(self.activity_source_id)
+                self.activity_source_id = None
+            if self.client_monitor is not None:
+                self.client_monitor.close()
+                self.client_monitor = None
             try:
                 self._destroy_capture()
             finally:
                 self.appsrc.emit("end-of-stream")
                 self.process.set_state(Gst.State.NULL)
+                self.streaming = False
                 self.output_started = False
                 self.output.set_state(Gst.State.NULL)
         print(f"CAMERA_STOP frames={self.frames}", flush=True)
@@ -845,10 +1176,12 @@ class CameraPipeline:
         request_path, result_path = self._still_paths()
         request_id = "unknown"
         result: dict[str, Any]
+        resume_preview = self.streaming
         try:
             request = json.loads(request_path.read_text(encoding="utf-8"))
             request_id = str(request["id"])
-            self._destroy_capture()
+            if self.streaming:
+                self._pause_streaming("capturing rear still")
 
             from yogabook_camera_capture import capture_to_path
 
@@ -873,19 +1206,8 @@ class CameraPipeline:
         finally:
             try:
                 self._destroy_capture()
-                self.sensor_device = configure_hardware(
-                    self.arguments.capture_device,
-                    self.arguments.media_device,
-                    self.profile,
-                )
-                self.sensor_controls = {
-                    name: int(value)
-                    for name, value in self.profile.get("sensor_controls", {}).items()
-                }
-                self._create_capture()
-                if self.capture is None:
-                    raise RuntimeError("physical capture pipeline was not recreated")
-                self.capture.set_state(Gst.State.PLAYING)
+                if resume_preview:
+                    self._resume_streaming("rear still complete")
             except Exception as error:
                 print(f"ERROR: cannot restore camera preview: {error}", file=sys.stderr, flush=True)
                 result = {"id": request_id, "ok": False, "error": f"preview restore failed: {error}"}
@@ -900,6 +1222,15 @@ class CameraPipeline:
 
 def main() -> int:
     arguments = parse_arguments()
+    CameraActivityMonitor(
+        arguments.idle_delay,
+        arguments.max_temperature,
+        arguments.resume_temperature,
+    )
+    ensure_safe_start_temperature(
+        hottest_temperature_celsius(),
+        arguments.max_temperature,
+    )
     arguments.camera = resolve_camera(arguments.camera)
     profile = load_config(arguments.config, arguments.camera)
     os.environ.setdefault("GST_GL_PLATFORM", "egl")
