@@ -39,7 +39,7 @@ for payload in "${required_payload[@]}"; do
 	test -f "$temporary_directory/root/$payload"
 done
 
-for document in ACCEPTANCE ARCHITECTURE CALIBRATION STATUS; do
+for document in ACCEPTANCE ARCHITECTURE CALIBRATION KERNEL-CONTRACT STATUS; do
 	path=$temporary_directory/root/usr/share/doc/yogabook-camera/$document.md
 	test -f "$path" || test -f "$path.gz"
 done

@@ -22,6 +22,7 @@ from yogabook_camera import (
     resolve_camera,
 )
 from yogabook_camera_capture import RearStillCapture
+from yogabook_camera_control import read_camera_state
 
 
 class CameraConfigurationTests(unittest.TestCase):
@@ -163,6 +164,27 @@ class CameraConfigurationTests(unittest.TestCase):
 
     def test_bright_clipped_pixel_is_excluded_from_white_balance(self) -> None:
         self.assertFalse(is_white_balance_candidate(235.1))
+
+
+class CameraControlStateTests(unittest.TestCase):
+    def test_state_read_strips_trailing_newline(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary) / "active-camera"
+            state.write_text("rear\n", encoding="utf-8")
+            self.assertEqual(read_camera_state(state, "front"), "rear")
+
+    def test_missing_state_returns_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary) / "active-camera"
+            self.assertEqual(read_camera_state(state, "front"), "front")
+
+    def test_state_read_does_not_hide_other_io_errors(self) -> None:
+        with patch(
+            "yogabook_camera_control.Path.read_text",
+            side_effect=PermissionError("denied"),
+        ):
+            with self.assertRaisesRegex(PermissionError, "denied"):
+                read_camera_state(Path("active-camera"), "front")
 
 
 class CameraSelectionMonitorTests(unittest.TestCase):

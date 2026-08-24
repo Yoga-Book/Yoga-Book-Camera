@@ -26,6 +26,24 @@ meetings.
 The Yoga Book-specific kernel work remains in `Yoga-Book-Linux-Kernel` and is
 not duplicated here.
 
+## Latest kernel/runtime validation
+
+The latest device-side validation used kernel
+`7.2.0-yogabook-20260824-202716`, built from integration commit
+`1386a134231e9f9295027accc9c0d005c0344e9a`. On the physical YB1-X91L:
+
+- OV2740 and OV8858 both bound to their sensor drivers;
+- the front link reported 288 MHz and the required 12x12 input padding;
+- OV2740 exposed red- and blue-balance controls;
+- OV8858 exposed digital gain from 1024 through 4095;
+- both `Front Camera` and `Rear Camera` completed bounded 30-frame opens;
+- sustained service operation produced no new AtomISP or CSS error.
+
+That kernel was validated as a one-shot boot; recording its package and source
+identity does not make it the persistent boot default. The kernel/userspace
+interface and provenance boundary are specified in
+[KERNEL-CONTRACT.md](KERNEL-CONTRACT.md).
+
 ## Userspace ISP evidence
 
 The repository implementation has run continuously on the physical tablet:
@@ -72,7 +90,7 @@ The repository implementation has run continuously on the physical tablet:
 - A direct 1280x720 frame exposed two-dimensional color shading hidden by the
   meeting crop. A clamped quadratic red/blue gain surface was physically
   rejected because it produced orange skin and inconsistent wall color. The
-  A subsequent neutral-only feedback experiment was also rejected because
+  subsequent neutral-only feedback experiment was also rejected because
   sparse samples drove the scene orange. The front profile now uses the
   previously stable whole-frame non-clipped white-balance feedback and retains
   conservative post-denoise edge enhancement; final physical acceptance

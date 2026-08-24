@@ -7,6 +7,8 @@ sensor and does not substitute for the front camera.
 
 ## Current status
 
+### Automated and transport status
+
 The project contains an experimental raw Bayer userspace ISP and Debian
 package. On the physical YB1-X91L it has proven:
 
@@ -18,6 +20,8 @@ package. On the physical YB1-X91L it has proven:
 - automatic one-at-a-time AtomISP switching from the application's camera
   selector.
 
+### Physical acceptance
+
 It is not yet a stable release. Front-camera color and noise still need final
 physical tuning against human skin in several lighting conditions. The rear
 camera transport and sensor test pattern are proven, and its black frame was
@@ -27,7 +31,9 @@ still requires physical color, focus and detail acceptance. See
 
 See [docs/STATUS.md](docs/STATUS.md) for established evidence,
 [docs/CALIBRATION.md](docs/CALIBRATION.md) for the calibration method and
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for subsystem ownership. The
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for subsystem ownership, and
+[docs/KERNEL-CONTRACT.md](docs/KERNEL-CONTRACT.md) for the required kernel and
+runtime interface. The
 inspected official package is documented in
 [docs/WINDOWS-DRIVER-EVIDENCE.md](docs/WINDOWS-DRIVER-EVIDENCE.md).
 

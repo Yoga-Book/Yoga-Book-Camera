@@ -7,6 +7,9 @@ Hardware behavior and implementation research reference:
 
 - the Linux kernel OV2740, OV8858, IPU bridge and AtomISP drivers, licensed
   under their respective upstream SPDX terms;
+- the GPL-2.0 upstream Linux OV5670 manual-white-balance implementation; the
+  corresponding Yoga Book OV8858 kernel change retains its exact
+  `Copyright (c) 2017 Intel Corporation.` notice;
 - Lenovo's official Yoga Book Windows driver package and its
   `OV2740_CJAE533_CHT.cpf` Intel AIQB tuning artifact;
 - [`EasyNetDev/atomisp-6.10-dkms`](https://github.com/EasyNetDev/atomisp-6.10-dkms),

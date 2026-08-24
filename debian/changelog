@@ -1,3 +1,11 @@
+yogabook-camera (0.2.12) unstable; urgency=medium
+
+  * Clarify the kernel/runtime contract and camera validation boundary.
+  * Document kernel-source provenance and retain required copyright notices.
+  * Centralize controller state reads and make its wait policy explicit.
+
+ -- Yoga Book Linux Project <noreply@github.com>  Mon, 24 Aug 2026 23:20:00 +0200
+
 yogabook-camera (0.2.11) unstable; urgency=medium
 
   * Present the browser endpoints simply as Front Camera and Rear Camera.

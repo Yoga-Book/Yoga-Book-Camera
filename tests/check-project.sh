@@ -29,6 +29,7 @@ required_files=(
 	docs/ACCEPTANCE.md
 	docs/ARCHITECTURE.md
 	docs/CALIBRATION.md
+	docs/KERNEL-CONTRACT.md
 	docs/STATUS.md
 	docs/WINDOWS-DRIVER-EVIDENCE.md
 	metadata/OV2740_CJAE533_CHT.cpf.sha256
@@ -73,6 +74,9 @@ for executable_file in \
 done
 
 grep -Fq 'GNU GENERAL PUBLIC LICENSE' "$root/LICENSE"
+grep -Fq 'Copyright (c) 2017 Intel Corporation.' \
+	"$root/docs/KERNEL-CONTRACT.md"
+grep -Fq 'WV517S actuator remains separate' "$root/docs/KERNEL-CONTRACT.md"
 grep -Fqx 'b6a240c4e47ed1187987f9f68d8e68d392b758467914aa7bcc73993fe7952a55  OV2740_CJAE533_CHT.cpf' \
 	"$root/metadata/OV2740_CJAE533_CHT.cpf.sha256"
 

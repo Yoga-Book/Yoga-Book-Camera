@@ -15,6 +15,9 @@ import time
 
 
 SERVICE = "yogabook-camera.service"
+SELECTION_READY_TIMEOUT_SECONDS = 60.0
+STILL_CAPTURE_TIMEOUT_SECONDS = 150.0
+STATE_POLL_INTERVAL_SECONDS = 0.2
 
 
 def service_command(*arguments: str, check: bool = False) -> subprocess.CompletedProcess[str]:
@@ -44,6 +47,14 @@ def runtime_camera_path() -> Path:
     return runtime / "yogabook-camera" / "active-camera"
 
 
+def read_camera_state(path: Path, default: str) -> str:
+    """Read a camera state file, returning a default while it does not exist."""
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return default
+
+
 def select(camera: str) -> None:
     destination = selection_path()
     destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -52,34 +63,23 @@ def select(camera: str) -> None:
     temporary.replace(destination)
     current_pid = service_pid()
     os.kill(current_pid, signal.SIGHUP)
-    deadline = time.monotonic() + 60
+    deadline = time.monotonic() + SELECTION_READY_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
-        try:
-            active = runtime_camera_path().read_text(encoding="utf-8").strip()
-        except (RuntimeError, subprocess.CalledProcessError, ValueError):
-            active = ""
-        except FileNotFoundError:
-            active = ""
+        active = read_camera_state(runtime_camera_path(), "")
         if (
             active == camera
             and service_command("is-active", "--quiet").returncode == 0
         ):
             print(f"Active Yoga Book camera: {camera}")
             return
-        time.sleep(0.2)
+        time.sleep(STATE_POLL_INTERVAL_SECONDS)
     raise TimeoutError("camera service did not become ready after selection")
 
 
 def status() -> None:
-    try:
-        camera = selection_path().read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
-        camera = "front"
+    camera = read_camera_state(selection_path(), "front")
     print(f"Selected camera: {camera}")
-    try:
-        active = runtime_camera_path().read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
-        active = "unavailable"
+    active = read_camera_state(runtime_camera_path(), "unavailable")
     print(f"Active camera: {active}")
     service_command("--no-pager", "status")
 
@@ -107,7 +107,7 @@ def capture(output: Path, focus_position: int | None, no_autofocus: bool) -> Non
     temporary.replace(request_path)
     os.kill(service_pid(), signal.SIGUSR2)
 
-    deadline = time.monotonic() + 150
+    deadline = time.monotonic() + STILL_CAPTURE_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         if result_path.is_file():
             result = json.loads(result_path.read_text(encoding="utf-8"))
@@ -120,7 +120,7 @@ def capture(output: Path, focus_position: int | None, no_autofocus: bool) -> Non
                 return
         if service_command("is-active", "--quiet").returncode != 0:
             raise RuntimeError("camera service stopped while capturing rear still")
-        time.sleep(0.2)
+        time.sleep(STATE_POLL_INTERVAL_SECONDS)
     raise TimeoutError("timed out waiting for rear still capture")
 
 
