@@ -7,18 +7,22 @@ sensor and does not substitute for the front camera.
 
 ## Current status
 
-This project is experimental and does **not** yet provide a production camera
-package. The kernel can transport complete 1920x1080 frames from the OV2740,
-but the visible result remains dark, noisy and poorly corrected. That is not an
-acceptable camera implementation.
+The project now contains an experimental raw Bayer userspace ISP and Debian
+package. On the physical YB1-X91L it has proven:
 
-The remaining problem is the image-processing pipeline: automatic exposure,
-automatic white balance, lens shading, color correction, gamma and denoising.
-Lenovo supplied sensor-specific Intel AIQ tuning in
-`OV2740_CJAE533_CHT.cpf`, but no compatible open Linux AIQ/3A service has yet
-been proven on this device.
+- continuous front OV2740 BGGR10 capture and 1280x720 browser output;
+- continuous rear OV8858 BGGR10 capture with per-row stride removal;
+- automatic sensor exposure/gain and userspace white balance convergence;
+- GPU color-shading correction and temporal/spatial denoising;
+- a standard V4L2 loopback endpoint usable by Chromium applications.
 
-See [docs/STATUS.md](docs/STATUS.md) for established evidence and
+It is not yet a stable release. Front-camera color and noise still need final
+physical tuning against human skin in several lighting conditions. The rear
+camera transport is proven, but its image profile still requires a physically
+uncovered, lit-scene calibration. See [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md).
+
+See [docs/STATUS.md](docs/STATUS.md) for established evidence,
+[docs/CALIBRATION.md](docs/CALIBRATION.md) for the calibration method and
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for subsystem ownership. The
 inspected official package is documented in
 [docs/WINDOWS-DRIVER-EVIDENCE.md](docs/WINDOWS-DRIVER-EVIDENCE.md).
@@ -64,10 +68,24 @@ runtime consumer.
 ## Development
 
 ```bash
-sudo apt install binutils coreutils make shellcheck
+sudo apt install binutils coreutils debhelper make shellcheck
 make test
+make package
 ```
 
-No release or Debian package should claim to fix the camera until the front
-camera passes real video-call testing with stable exposure, color and noise
-under multiple lighting conditions.
+## Runtime
+
+The package deliberately enables AtomISP raw output only on a DMI-matched
+YB1-X91L and exposes one `Yoga Book Camera` endpoint. The front camera is the
+default. Switch sensors with:
+
+```bash
+yogabook_camera_control.py select front
+yogabook_camera_control.py select rear
+yogabook_camera_control.py status
+yogabook_camera_control.py capture "$HOME/Pictures/yogabook-rear.jpg"
+```
+
+Only one sensor can stream through AtomISP2401 at a time. No release should
+claim complete camera support until every physical gate in the acceptance
+document passes.

@@ -1,0 +1,57 @@
+# Camera acceptance
+
+Camera support is complete only when all automated and physical gates below
+pass on a Lenovo Yoga Book YB1-X91L. Transport success is necessary but is not
+image-quality acceptance.
+
+## Automated gates
+
+- `make test` and `make package` pass from a clean checkout.
+- The package installs, upgrades and removes without maintainer-script errors.
+- DMI gating prevents raw AtomISP enablement on any other product.
+- The front and rear sensors are discovered by media entity name rather than a
+  fixed subdevice number.
+- Front and rear direct streams run without short frames, GStreamer errors,
+  AtomISP/CSS errors or unbounded memory growth.
+- The loopback endpoint is 1280x720 YUYV at 30 fps and is visible through
+  PipeWire and Chromium.
+- Selecting either sensor survives closing/reopening the application. The
+  front camera remains the safe default for a fresh user.
+- Camera operation recovers after five suspend/resume cycles and three cold
+  boots.
+- A 30-minute meeting stream maintains frame delivery, bounded memory and
+  usable audio on the same device.
+
+## Front OV2740 physical gates
+
+Evaluate a live face, neutral target, saturated objects and fine detail in
+daylight, normal indoor light and dim indoor light. Require:
+
+- recognizable natural skin, orange/red, green and blue colors;
+- no persistent green, magenta or cyan cast;
+- no visible left/right or corner color discontinuity on a neutral target;
+- stable exposure and white balance without pulsing;
+- readable central detail and no gross Bayer, line or wave artifacts;
+- noise appropriate for a 2 MP 2016 sensor, without destructive smearing;
+- acceptable motion and lip synchronization in a real Google Meet session.
+
+The OV2740 is approximately 2 MP. It is not expected to match a modern phone,
+but its processed 1080p transport must produce a credible meeting image.
+
+## Rear OV8858 physical gates
+
+Lift the tablet so the rear lens is fully uncovered. Require:
+
+- the same color/exposure/stability checks as the front camera;
+- a continuous 1616x1208 preview;
+- a full-resolution 3248x2432 still path with correct focus operation;
+- a saved still with plausible 8 MP detail and no purple stripes, bad rows or
+  frame truncation.
+
+The rear sensor cannot substitute for the front meeting camera.
+
+## Release decision
+
+Record automated transport and physical image quality separately. A release
+must remain experimental if any mode, sensor, browser, lifecycle or physical
+gate is missing or only inferred.

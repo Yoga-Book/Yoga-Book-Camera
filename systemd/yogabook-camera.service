@@ -1,0 +1,22 @@
+[Unit]
+Description=Yoga Book raw camera image processor
+Requires=yogabook-camera-prepare.service
+After=yogabook-camera-prepare.service user-runtime-dir@1000.service
+Wants=user-runtime-dir@1000.service
+Before=display-manager.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=1000
+SupplementaryGroups=video render
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+ExecStart=/usr/libexec/yogabook-camera/yogabook_camera.py --camera=auto
+ExecStop=-/usr/bin/v4l2-ctl -d /dev/video10 --set-ctrl=keep_format=0
+Restart=always
+RestartSec=2s
+TimeoutStartSec=60s
+TimeoutStopSec=20s
+
+[Install]
+WantedBy=multi-user.target
