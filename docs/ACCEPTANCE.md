@@ -13,10 +13,13 @@ image-quality acceptance.
   fixed subdevice number.
 - Front and rear direct streams run without short frames, GStreamer errors,
   AtomISP/CSS errors or unbounded memory growth.
-- The loopback endpoint is 1280x720 YUYV at 30 fps and is visible through
-  PipeWire and Chromium.
-- Selecting either sensor survives closing/reopening the application. The
-  front camera remains the safe default for a fresh user.
+- `Front Camera` and `Rear Camera` are both visible as
+  1280x720 YUYV devices through PipeWire and Chromium.
+- Selecting either device in a live Google Meet call automatically activates
+  the matching sensor without a command, service restart or lost endpoint.
+- Short Chromium enumeration probes do not change the active sensor. Selecting
+  either sensor survives closing/reopening the application, and the front
+  camera remains the safe default for a fresh user.
 - Camera operation recovers after five suspend/resume cycles and three cold
   boots.
 - A 30-minute meeting stream maintains frame delivery, bounded memory and
@@ -48,7 +51,8 @@ Lift the tablet so the rear lens is fully uncovered. Require:
 - a saved still with plausible 8 MP detail and no purple stripes, bad rows or
   frame truncation.
 
-The rear sensor cannot substitute for the front meeting camera.
+The rear sensor is selectable for a meeting when the tablet is positioned so
+its lens has a useful view, but the front remains the normal meeting camera.
 
 ## Release decision
 

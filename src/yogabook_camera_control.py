@@ -39,23 +39,29 @@ def selection_path() -> Path:
     return root / "yogabook-camera" / "active-camera"
 
 
+def runtime_camera_path() -> Path:
+    runtime = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+    return runtime / "yogabook-camera" / "active-camera"
+
+
 def select(camera: str) -> None:
     destination = selection_path()
     destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     temporary = destination.with_suffix(".tmp")
     temporary.write_text(f"{camera}\n", encoding="utf-8")
     temporary.replace(destination)
-    previous_pid = service_pid()
-    os.kill(previous_pid, signal.SIGTERM)
+    current_pid = service_pid()
+    os.kill(current_pid, signal.SIGHUP)
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         try:
-            restarted_pid = service_pid()
+            active = runtime_camera_path().read_text(encoding="utf-8").strip()
         except (RuntimeError, subprocess.CalledProcessError, ValueError):
-            restarted_pid = 0
+            active = ""
+        except FileNotFoundError:
+            active = ""
         if (
-            restarted_pid != previous_pid
-            and restarted_pid > 0
+            active == camera
             and service_command("is-active", "--quiet").returncode == 0
         ):
             print(f"Active Yoga Book camera: {camera}")
@@ -70,6 +76,11 @@ def status() -> None:
     except FileNotFoundError:
         camera = "front"
     print(f"Selected camera: {camera}")
+    try:
+        active = runtime_camera_path().read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        active = "unavailable"
+    print(f"Active camera: {active}")
     service_command("--no-pager", "status")
 
 

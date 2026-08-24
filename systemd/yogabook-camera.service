@@ -11,8 +11,11 @@ NotifyAccess=main
 User=1000
 SupplementaryGroups=video render
 Environment=XDG_RUNTIME_DIR=/run/user/1000
+ExecStartPre=-/usr/bin/v4l2-ctl -d /dev/video10 --set-ctrl=keep_format=0
+ExecStartPre=-/usr/bin/v4l2-ctl -d /dev/video11 --set-ctrl=keep_format=0
 ExecStart=/usr/libexec/yogabook-camera/yogabook_camera.py --camera=auto
 ExecStop=-/usr/bin/v4l2-ctl -d /dev/video10 --set-ctrl=keep_format=0
+ExecStop=-/usr/bin/v4l2-ctl -d /dev/video11 --set-ctrl=keep_format=0
 Restart=always
 RestartSec=2s
 TimeoutStartSec=60s

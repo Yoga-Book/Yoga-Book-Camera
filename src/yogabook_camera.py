@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -84,8 +85,15 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--camera", choices=("auto", "front", "rear"), default="auto")
     parser.add_argument("--config", type=Path)
     parser.add_argument("--capture-device", default="/dev/video0")
-    parser.add_argument("--output-device", default="/dev/video10")
+    parser.add_argument("--front-output-device", default="/dev/video10")
+    parser.add_argument("--rear-output-device", default="/dev/video11")
     parser.add_argument("--media-device", default="/dev/media0")
+    parser.add_argument(
+        "--switch-dwell",
+        type=float,
+        default=1.0,
+        help="seconds a single virtual camera must remain open before switching",
+    )
     parser.add_argument("--no-auto", action="store_true", help="disable adaptive tone and white balance")
     parser.add_argument("--print-pipeline", action="store_true")
     return parser.parse_args()
@@ -108,8 +116,7 @@ def load_config(path: Path | None, camera: str) -> dict[str, Any]:
 def resolve_camera(camera: str) -> str:
     if camera != "auto":
         return camera
-    selection = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    selection = selection / "yogabook-camera" / "active-camera"
+    selection = selection_path()
     try:
         selected = selection.read_text(encoding="utf-8").strip()
     except FileNotFoundError:
@@ -117,6 +124,110 @@ def resolve_camera(camera: str) -> str:
     if selected not in ("front", "rear"):
         raise SystemExit(f"invalid camera selection in {selection}: {selected!r}")
     return selected
+
+
+def selection_path() -> Path:
+    root = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    return root / "yogabook-camera" / "active-camera"
+
+
+def persist_camera(camera: str) -> None:
+    destination = selection_path()
+    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary = destination.with_suffix(".tmp")
+    temporary.write_text(f"{camera}\n", encoding="utf-8")
+    temporary.replace(destination)
+
+
+def runtime_camera_path() -> Path:
+    runtime = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+    return runtime / "yogabook-camera" / "active-camera"
+
+
+def publish_runtime_camera(camera: str) -> None:
+    destination = runtime_camera_path()
+    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary = destination.with_suffix(".tmp")
+    temporary.write_text(f"{camera}\n", encoding="utf-8")
+    temporary.replace(destination)
+
+
+def externally_open_cameras(
+    devices: dict[str, str],
+    *,
+    proc_root: Path = Path("/proc"),
+    own_pid: int | None = None,
+) -> set[str]:
+    """Return camera endpoints held open outside the processor itself."""
+    if own_pid is None:
+        own_pid = os.getpid()
+    device_numbers = {
+        os.stat(device).st_rdev: camera for camera, device in devices.items()
+    }
+    opened: set[str] = set()
+    try:
+        processes = tuple(proc_root.iterdir())
+    except OSError:
+        return opened
+    for process in processes:
+        if not process.name.isdecimal() or int(process.name) == own_pid:
+            continue
+        try:
+            descriptors = tuple((process / "fd").iterdir())
+        except OSError:
+            continue
+        for descriptor in descriptors:
+            try:
+                descriptor_status = descriptor.stat()
+            except OSError:
+                continue
+            if not stat.S_ISCHR(descriptor_status.st_mode):
+                continue
+            camera = device_numbers.get(descriptor_status.st_rdev)
+            if camera:
+                opened.add(camera)
+    return opened
+
+
+class CameraSelectionMonitor:
+    """Debounce short browser probes and accept one sustained endpoint."""
+
+    def __init__(self, dwell: float):
+        self.dwell = dwell
+        self.candidate: str | None = None
+        self.candidate_since = 0.0
+        self.previous_opened: set[str] = set()
+
+    def update(
+        self,
+        opened: set[str],
+        active: str,
+        now: float,
+    ) -> str | None:
+        candidate: str | None = None
+        if len(opened) == 1:
+            candidate = next(iter(opened))
+        elif len(opened) > 1:
+            added = opened - self.previous_opened
+            if len(added) == 1:
+                candidate = next(iter(added))
+            elif self.candidate in opened:
+                candidate = self.candidate
+        self.previous_opened = opened.copy()
+        if candidate is None:
+            self.candidate = None
+            return None
+        if candidate == active:
+            self.candidate = None
+            return None
+        if candidate != self.candidate:
+            self.candidate = candidate
+            self.candidate_since = now
+            return None
+        if now - self.candidate_since < self.dwell:
+            return None
+        self.candidate = None
+        return candidate
 
 
 def command(*arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -273,7 +384,15 @@ class CameraPipeline:
         self.last_report = 0
         self.still_pending = False
         self.ready_reported = False
+        self.output_started = False
+        self.published_camera: str | None = None
+        self.switching = False
         self.sensor_device = sensor_device
+        self.output_devices = {
+            "front": arguments.front_output_device,
+            "rear": arguments.rear_output_device,
+        }
+        self.selection_monitor = CameraSelectionMonitor(arguments.switch_dwell)
         self.sensor_controls = {
             name: int(value) for name, value in profile.get("sensor_controls", {}).items()
         }
@@ -290,18 +409,14 @@ class CameraPipeline:
             f"width={width},height={height},framerate=30/1"
         )
 
-        self.capture_description = (
-            f"v4l2src device={arguments.capture_device} io-mode=2 do-timestamp=true ! "
-            f"{caps} ! appsink name=capture emit-signals=true sync=false "
-            "max-buffers=2 drop=true"
-        )
+        self.capture_description = self._capture_pipeline_description(profile)
         self.process_description = (
             f"appsrc name=source is-live=true format=time caps=\"{caps}\" "
             "max-buffers=2 leaky-type=downstream ! "
             "bayer2rgb ! videoconvert n-threads=4 ! "
             "videoscale method=bilinear n-threads=4 ! "
             f"video/x-raw,width={output_width},height={output_height},framerate=30/1 ! "
-            f"videobalance contrast={processing['contrast']} brightness=0.0 "
+            f"videobalance name=balance contrast={processing['contrast']} brightness=0.0 "
             f"saturation={processing['saturation']} ! "
             f"gamma name=tone gamma={processing['gamma']} ! "
             "videoconvert n-threads=4 ! "
@@ -309,24 +424,37 @@ class CameraPipeline:
             f"frei0r-filter-coloradj-rgb name=whitebalance action=1.0 "
             f"r={processing['rgb_red']} g={processing['rgb_green']} "
             f"b={processing['rgb_blue']} keep-luma=false ! "
-            f"frei0r-filter-hqdn3d spatial={processing['denoise_spatial']} "
+            f"frei0r-filter-hqdn3d name=denoise spatial={processing['denoise_spatial']} "
             f"temporal={processing['denoise_temporal']} ! "
             "glupload ! glshader name=correction ! gldownload ! tee name=processed "
             "processed. ! queue max-size-buffers=2 leaky=downstream ! "
             "videoconvert n-threads=4 ! "
             f"video/x-raw,format=YUY2,width={output_width},height={output_height},framerate=30/1 ! "
-            f"v4l2sink device={arguments.output_device} sync=false "
+            "intervideosink name=browser_bridge channel=yogabook-camera sync=false "
             "processed. ! queue max-size-buffers=1 leaky=downstream ! "
             "videorate drop-only=true max-rate=2 ! "
             "videoscale method=nearest-neighbour ! "
             "video/x-raw,format=RGBA,width=64,height=36,framerate=2/1 ! "
             "appsink name=statistics emit-signals=true sync=false max-buffers=1 drop=true"
         )
+        self.output_description = (
+            "intervideosrc channel=yogabook-camera do-timestamp=true timeout=1000000000 ! "
+            "videoconvert n-threads=2 ! videoscale method=bilinear n-threads=2 ! "
+            f"video/x-raw,format=YUY2,width={output_width},height={output_height},"
+            "framerate=30/1,colorimetry=2:4:7:1 ! "
+            "tee name=browser_outputs "
+            "browser_outputs. ! queue max-size-buffers=2 leaky=downstream ! "
+            f"v4l2sink device={arguments.front_output_device} sync=false "
+            "browser_outputs. ! queue max-size-buffers=2 leaky=downstream ! "
+            f"v4l2sink device={arguments.rear_output_device} sync=false"
+        )
         if arguments.print_pipeline:
             print(self.capture_description)
             print(self.process_description)
+            print(self.output_description)
 
         self.process = Gst.parse_launch(self.process_description)
+        self.output = Gst.parse_launch(self.output_description)
         self.capture: Gst.Element | None = None
         self.appsink: Gst.Element | None = None
         self.capture_bus: Gst.Bus | None = None
@@ -334,11 +462,15 @@ class CameraPipeline:
         self.sample_handler: int | None = None
         self.eos_handler: int | None = None
         self.appsrc = self.process.get_by_name("source")
+        self.browser_bridge = self.process.get_by_name("browser_bridge")
         self.statistics = self.process.get_by_name("statistics")
+        self.balance = self.process.get_by_name("balance")
         self.tone = self.process.get_by_name("tone")
         self.whitebalance = self.process.get_by_name("whitebalance")
+        self.denoise = self.process.get_by_name("denoise")
+        self.correction = self.process.get_by_name("correction")
         shader = FRONT_FRAGMENT_SHADER if arguments.camera == "front" else IDENTITY_FRAGMENT_SHADER
-        self.process.get_by_name("correction").set_property("fragment", shader)
+        self.correction.set_property("fragment", shader)
         self.gamma = float(processing["gamma"])
         self.rgb_red = float(processing["rgb_red"])
         self.rgb_blue = float(processing["rgb_blue"])
@@ -347,7 +479,21 @@ class CameraPipeline:
         process_bus = self.process.get_bus()
         process_bus.add_signal_watch()
         process_bus.connect("message", self._message)
+        output_bus = self.output.get_bus()
+        output_bus.add_signal_watch()
+        output_bus.connect("message", self._message)
         self._create_capture()
+
+    def _capture_pipeline_description(self, profile: dict[str, Any]) -> str:
+        caps = (
+            f"video/x-bayer,format={profile['bayer_format']},"
+            f"width={profile['width']},height={profile['height']},framerate=30/1"
+        )
+        return (
+            f"v4l2src device={self.arguments.capture_device} io-mode=2 do-timestamp=true ! "
+            f"{caps} ! appsink name=capture emit-signals=true sync=false "
+            "max-buffers=2 drop=true"
+        )
 
     def _create_capture(self) -> None:
         if self.capture is not None:
@@ -391,6 +537,125 @@ class CameraPipeline:
         del capture
         gc.collect()
 
+    def _apply_profile(self, camera: str, profile: dict[str, Any]) -> None:
+        processing = profile["processing"]
+        caps = Gst.Caps.from_string(
+            f"video/x-bayer,format={profile['bayer_format']},"
+            f"width={profile['width']},height={profile['height']},framerate=30/1"
+        )
+        self.appsrc.set_property("caps", caps)
+        self.balance.set_property("contrast", float(processing["contrast"]))
+        self.balance.set_property("saturation", float(processing["saturation"]))
+        self.gamma = float(processing["gamma"])
+        self.tone.set_property("gamma", self.gamma)
+        self.rgb_red = float(processing["rgb_red"])
+        self.rgb_blue = float(processing["rgb_blue"])
+        self.whitebalance.set_property("r", self.rgb_red)
+        self.whitebalance.set_property("g", float(processing["rgb_green"]))
+        self.whitebalance.set_property("b", self.rgb_blue)
+        self.denoise.set_property("spatial", float(processing["denoise_spatial"]))
+        self.denoise.set_property("temporal", float(processing["denoise_temporal"]))
+        shader = FRONT_FRAGMENT_SHADER if camera == "front" else IDENTITY_FRAGMENT_SHADER
+        self.correction.set_property("fragment", shader)
+        self.arguments.camera = camera
+        self.profile = profile
+        self.source_stride = int(profile["bytes_per_line"])
+        self.capture_description = self._capture_pipeline_description(profile)
+        self.sensor_controls = {
+            name: int(value) for name, value in profile.get("sensor_controls", {}).items()
+        }
+        self.control_ranges = profile.get("control_ranges", {})
+        self.statistics_frames = 0
+        self.last_report = 0
+
+    def _start_capture(self) -> None:
+        self._create_capture()
+        if self.capture is None:
+            raise RuntimeError("physical capture pipeline was not created")
+        result = self.capture.set_state(Gst.State.PLAYING)
+        if result == Gst.StateChangeReturn.FAILURE:
+            raise RuntimeError("physical capture failed to enter PLAYING")
+
+    def _stop_processing(self) -> None:
+        self.process.set_state(Gst.State.NULL)
+        state_result, current, _ = self.process.get_state(10 * Gst.SECOND)
+        if state_result == Gst.StateChangeReturn.FAILURE or current != Gst.State.NULL:
+            raise RuntimeError(f"image processing did not stop cleanly: {current.value_nick}")
+
+    def _start_processing(self) -> None:
+        result = self.process.set_state(Gst.State.PLAYING)
+        if result == Gst.StateChangeReturn.FAILURE:
+            raise RuntimeError("image processing failed to enter PLAYING")
+
+    def _switch_camera(self, camera: str) -> None:
+        if camera == self.arguments.camera or self.switching or self.still_pending:
+            return
+        old_camera = self.arguments.camera
+        old_profile = self.profile
+        profile = load_config(self.arguments.config, camera)
+        self.switching = True
+        print(f"CAMERA_SWITCH requested={camera} previous={old_camera}", flush=True)
+        try:
+            self._destroy_capture()
+            self._stop_processing()
+            sensor_device = configure_hardware(
+                self.arguments.capture_device,
+                self.arguments.media_device,
+                profile,
+            )
+            self._apply_profile(camera, profile)
+            self.sensor_device = sensor_device
+            self._start_processing()
+            self._start_capture()
+            persist_camera(camera)
+            print(f"CAMERA_SWITCH active={camera}", flush=True)
+        except Exception as error:
+            print(f"ERROR: camera switch to {camera} failed: {error}", file=sys.stderr, flush=True)
+            try:
+                self._destroy_capture()
+                self._stop_processing()
+                sensor_device = configure_hardware(
+                    self.arguments.capture_device,
+                    self.arguments.media_device,
+                    old_profile,
+                )
+                self._apply_profile(old_camera, old_profile)
+                self.sensor_device = sensor_device
+                self._start_processing()
+                self._start_capture()
+                persist_camera(old_camera)
+                print(f"CAMERA_SWITCH restored={old_camera}", flush=True)
+            except Exception as restore_error:
+                print(
+                    f"ERROR: cannot restore {old_camera} camera: {restore_error}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                self.loop.quit()
+        finally:
+            self.switching = False
+
+    def _monitor_camera_selection(self) -> bool:
+        try:
+            opened = externally_open_cameras(self.output_devices)
+            requested = self.selection_monitor.update(
+                opened,
+                self.arguments.camera,
+                time.monotonic(),
+            )
+            if requested:
+                self._switch_camera(requested)
+        except Exception as error:
+            print(f"WARN: cannot inspect browser camera selection: {error}", file=sys.stderr)
+        return GLib.SOURCE_CONTINUE
+
+    def request_configured_camera(self, _signal: int, _frame: object) -> None:
+        def switch() -> bool:
+            self._switch_camera(resolve_camera("auto"))
+            return GLib.SOURCE_REMOVE
+
+        GLib.idle_add(switch)
+
     def _tight_buffer(self, source: Gst.Buffer) -> Gst.Buffer | None:
         return normalized_bayer_buffer(
             source,
@@ -419,15 +684,19 @@ class CameraPipeline:
             return Gst.FlowReturn.OK
         pixels = memoryview(info.data)
         if self.statistics_frames == 0:
-            lock_loopback_format(self.arguments.output_device)
             print(
                 f"CAMERA_STATS_CAPS caps={sample.get_caps().to_string()} "
                 f"bytes={len(pixels)} first={list(pixels[:16])}",
                 flush=True,
             )
-            if not self.ready_reported:
-                notify_systemd("READY=1\nSTATUS=Corrected camera frames are available")
-                self.ready_reported = True
+        if self.output_started and self.published_camera != self.arguments.camera:
+            publish_runtime_camera(self.arguments.camera)
+            self.published_camera = self.arguments.camera
+        if self.output_started and not self.ready_reported:
+            for output_device in self.output_devices.values():
+                lock_loopback_format(output_device)
+            notify_systemd("READY=1\nSTATUS=Corrected camera frames are available")
+            self.ready_reported = True
         luminance: list[float] = []
         valid_r = valid_g = valid_b = 0.0
         valid_count = 0
@@ -533,16 +802,28 @@ class CameraPipeline:
             self.loop.quit()
 
     def run(self) -> int:
-        self.process.set_state(Gst.State.PLAYING)
-        if self.capture is None:
-            raise RuntimeError("physical capture pipeline is missing")
-        self.capture.set_state(Gst.State.PLAYING)
         try:
+            self.process.set_state(Gst.State.PLAYING)
+            if self.capture is None:
+                raise RuntimeError("physical capture pipeline is missing")
+            self.capture.set_state(Gst.State.PLAYING)
+            deadline = time.monotonic() + 10
+            while self.browser_bridge.get_property("last-sample") is None:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("timed out waiting for the first processed camera frame")
+                time.sleep(0.05)
+            self.output.set_state(Gst.State.PLAYING)
+            self.output_started = True
+            GLib.timeout_add(500, self._monitor_camera_selection)
             self.loop.run()
         finally:
-            self._destroy_capture()
-            self.appsrc.emit("end-of-stream")
-            self.process.set_state(Gst.State.NULL)
+            try:
+                self._destroy_capture()
+            finally:
+                self.appsrc.emit("end-of-stream")
+                self.process.set_state(Gst.State.NULL)
+                self.output_started = False
+                self.output.set_state(Gst.State.NULL)
         print(f"CAMERA_STOP frames={self.frames}", flush=True)
         return 0
 
@@ -630,6 +911,7 @@ def main() -> int:
     for signum in (signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, pipeline.stop)
     signal.signal(signal.SIGUSR2, pipeline.request_still)
+    signal.signal(signal.SIGHUP, pipeline.request_configured_camera)
     return pipeline.run()
 
 

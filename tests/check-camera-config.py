@@ -87,6 +87,31 @@ def validate_profile(name: str, profile: dict[str, Any]) -> None:
         require(controls.get("red_balance") == 1024, "front: sensor red balance must remain at unity")
         require(controls.get("blue_balance") == 1024, "front: sensor blue balance must remain at unity")
     else:
+        require(
+            controls["analogue_gain"] == 2047,
+            "rear: initial analogue gain must match the physically validated maximum",
+        )
+        require(
+            controls["digital_gain"] == 4095,
+            "rear: initial digital gain must match the physically validated maximum",
+        )
+        require(
+            ranges["digital_gain"] == [1024, 4095],
+            "rear: digital gain range must match the OV8858 MWB control",
+        )
+        require(
+            processing["gamma"] == 2.0,
+            "rear: gamma must match the physically measured indoor candidate",
+        )
+        require(
+            (
+                processing["rgb_red"],
+                processing["rgb_green"],
+                processing["rgb_blue"],
+            )
+            == (0.65, 0.5, 0.6),
+            "rear: RGB gains must match the same-frame neutral candidate",
+        )
         still = profile.get("still")
         require(isinstance(still, dict), "rear: still must be an object")
         require(

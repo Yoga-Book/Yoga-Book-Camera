@@ -7,19 +7,23 @@ sensor and does not substitute for the front camera.
 
 ## Current status
 
-The project now contains an experimental raw Bayer userspace ISP and Debian
+The project contains an experimental raw Bayer userspace ISP and Debian
 package. On the physical YB1-X91L it has proven:
 
 - continuous front OV2740 BGGR10 capture and 1280x720 browser output;
 - continuous rear OV8858 BGGR10 capture with per-row stride removal;
 - automatic sensor exposure/gain and userspace white balance convergence;
 - GPU color-shading correction and temporal/spatial denoising;
-- a standard V4L2 loopback endpoint usable by Chromium applications.
+- separate front and rear V4L2 endpoints usable by Chromium applications;
+- automatic one-at-a-time AtomISP switching from the application's camera
+  selector.
 
 It is not yet a stable release. Front-camera color and noise still need final
 physical tuning against human skin in several lighting conditions. The rear
-camera transport is proven, but its image profile still requires a physically
-uncovered, lit-scene calibration. See [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md).
+camera transport and sensor test pattern are proven, and its black frame was
+traced to incorrect kernel digital-gain programming. A corrected real 8 MP
+still requires physical color, focus and detail acceptance. See
+[docs/ACCEPTANCE.md](docs/ACCEPTANCE.md).
 
 See [docs/STATUS.md](docs/STATUS.md) for established evidence,
 [docs/CALIBRATION.md](docs/CALIBRATION.md) for the calibration method and
@@ -76,8 +80,14 @@ make package
 ## Runtime
 
 The package deliberately enables AtomISP raw output only on a DMI-matched
-YB1-X91L and exposes one `Yoga Book Camera` endpoint. The front camera is the
-default. Switch sensors with:
+YB1-X91L and exposes `Front Camera` and `Rear Camera`.
+Choose either device directly in Google Meet, Chromium or another V4L2 camera
+application. The service observes which endpoint the application keeps open
+and switches the single physical AtomISP pipeline automatically. The front
+camera is the default until an application selects the rear camera.
+
+The diagnostic controller performs the same in-place handoff without
+restarting the browser-facing endpoints:
 
 ```bash
 yogabook_camera_control.py select front
@@ -86,6 +96,7 @@ yogabook_camera_control.py status
 yogabook_camera_control.py capture "$HOME/Pictures/yogabook-rear.jpg"
 ```
 
-Only one sensor can stream through AtomISP2401 at a time. No release should
+Only the selected sensor streams through AtomISP2401; the two named endpoints
+are application choices, not simultaneous physical streams. No release should
 claim complete camera support until every physical gate in the acceptance
 document passes.

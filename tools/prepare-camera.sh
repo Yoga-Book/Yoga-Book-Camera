@@ -12,22 +12,32 @@ case $product_name in
 		;;
 esac
 
-if [[ ! -e /dev/video10 ]]; then
+if [[ ! -e /dev/video10 && ! -e /dev/video11 ]]; then
 	modprobe v4l2loopback \
-		video_nr=10 \
-		card_label='Yoga Book Camera' \
-		exclusive_caps=1 \
+		devices=2 \
+		video_nr=10,11 \
+		card_label='Front Camera,Rear Camera' \
+		exclusive_caps=1,1 \
 		max_buffers=2
-	udevadm settle --timeout=5
+	udevadm settle --timeout=5 || true
 fi
 
-if [[ ! -e /dev/video10 ]] && command -v v4l2loopback-ctl >/dev/null; then
-	v4l2loopback-ctl add \
-		--name 'Yoga Book Camera' \
-		--exclusive-caps 1 \
-		--buffers 2 \
-		/dev/video10
-	udevadm settle --timeout=5
+if command -v v4l2loopback-ctl >/dev/null; then
+	if [[ ! -e /dev/video10 ]]; then
+		v4l2loopback-ctl add \
+			--name 'Front Camera' \
+			--exclusive-caps 1 \
+			--buffers 2 \
+			/dev/video10
+	fi
+	if [[ ! -e /dev/video11 ]]; then
+		v4l2loopback-ctl add \
+			--name 'Rear Camera' \
+			--exclusive-caps 1 \
+			--buffers 2 \
+			/dev/video11
+	fi
+	udevadm settle --timeout=5 || true
 fi
 
 if [[ ! -e /sys/module/atomisp/parameters/allow_raw_output ]]; then
@@ -49,18 +59,19 @@ done
 	echo 'ERROR: AtomISP capture node /dev/video0 is missing' >&2
 	exit 1
 }
-[[ -e /dev/video10 ]] || {
-	echo 'ERROR: Yoga Book loopback node /dev/video10 is missing' >&2
-	exit 1
-}
-
-loopback_name=$(< /sys/class/video4linux/video10/name)
-case $loopback_name in
-	Yoga\ Book*Camera) ;;
-	*)
-		echo "ERROR: /dev/video10 belongs to a different device: $loopback_name" >&2
+for specification in '10:Front Camera' '11:Rear Camera'; do
+	device_number=${specification%%:*}
+	expected_name=${specification#*:}
+	device=/dev/video$device_number
+	[[ -e $device ]] || {
+		echo "ERROR: Yoga Book loopback node $device is missing" >&2
 		exit 1
-		;;
-esac
+	}
+	loopback_name=$(< "/sys/class/video4linux/video$device_number/name")
+	if [[ $loopback_name != "$expected_name" ]]; then
+		echo "ERROR: $device belongs to a different device: $loopback_name" >&2
+		exit 1
+	fi
+done
 
 echo 'Yoga Book camera devices prepared'

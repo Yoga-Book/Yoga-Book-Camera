@@ -12,6 +12,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from yogabook_camera import (
+    CameraSelectionMonitor,
     command_when_available,
     configure_hardware,
     discover_sensor_subdevice,
@@ -162,6 +163,38 @@ class CameraConfigurationTests(unittest.TestCase):
 
     def test_bright_clipped_pixel_is_excluded_from_white_balance(self) -> None:
         self.assertFalse(is_white_balance_candidate(235.1))
+
+
+class CameraSelectionMonitorTests(unittest.TestCase):
+    def test_short_browser_probe_does_not_switch(self) -> None:
+        monitor = CameraSelectionMonitor(1.0)
+        self.assertIsNone(monitor.update({"rear"}, "front", 10.0))
+        self.assertIsNone(monitor.update(set(), "front", 10.5))
+        self.assertIsNone(monitor.update({"rear"}, "front", 11.0))
+
+    def test_sustained_single_endpoint_switches(self) -> None:
+        monitor = CameraSelectionMonitor(1.0)
+        self.assertIsNone(monitor.update({"rear"}, "front", 20.0))
+        self.assertEqual(monitor.update({"rear"}, "front", 21.0), "rear")
+
+    def test_two_open_endpoints_are_ambiguous(self) -> None:
+        monitor = CameraSelectionMonitor(1.0)
+        self.assertIsNone(monitor.update({"front", "rear"}, "front", 30.0))
+        self.assertIsNone(monitor.update({"front", "rear"}, "front", 31.5))
+
+    def test_new_endpoint_wins_during_browser_handoff_overlap(self) -> None:
+        monitor = CameraSelectionMonitor(1.0)
+        self.assertIsNone(monitor.update({"rear"}, "rear", 30.0))
+        self.assertIsNone(monitor.update({"front", "rear"}, "rear", 31.0))
+        self.assertEqual(
+            monitor.update({"front", "rear"}, "rear", 32.0),
+            "front",
+        )
+
+    def test_active_endpoint_never_requests_a_switch(self) -> None:
+        monitor = CameraSelectionMonitor(1.0)
+        self.assertIsNone(monitor.update({"front"}, "front", 40.0))
+        self.assertIsNone(monitor.update({"front"}, "front", 42.0))
 
 
 class RearStillCaptureTests(unittest.TestCase):

@@ -124,8 +124,25 @@ grep -Fq 'SupplementaryGroups=video render' "$root/systemd/yogabook-camera.servi
 grep -Fq 'Before=display-manager.service' "$root/systemd/yogabook-camera.service"
 grep -Fq 'ExecStop=-/usr/bin/v4l2-ctl -d /dev/video10 --set-ctrl=keep_format=0' \
 	"$root/systemd/yogabook-camera.service"
+grep -Fq 'ExecStop=-/usr/bin/v4l2-ctl -d /dev/video11 --set-ctrl=keep_format=0' \
+	"$root/systemd/yogabook-camera.service"
+grep -Fq 'ExecStartPre=-/usr/bin/v4l2-ctl -d /dev/video10 --set-ctrl=keep_format=0' \
+	"$root/systemd/yogabook-camera.service"
+grep -Fq 'ExecStartPre=-/usr/bin/v4l2-ctl -d /dev/video11 --set-ctrl=keep_format=0' \
+	"$root/systemd/yogabook-camera.service"
 grep -Fq 'os.kill(service_pid(), signal.SIGUSR2)' "$root/src/yogabook_camera_control.py"
-grep -Fq 'restarted_pid != previous_pid' "$root/src/yogabook_camera_control.py"
+grep -Fq 'os.kill(current_pid, signal.SIGHUP)' "$root/src/yogabook_camera_control.py"
+grep -Fq 'CameraSelectionMonitor(arguments.switch_dwell)' "$root/src/yogabook_camera.py"
+grep -Fq 'intervideosink name=browser_bridge channel=yogabook-camera sync=false' \
+	"$root/src/yogabook_camera.py"
+grep -Fq 'intervideosrc channel=yogabook-camera' "$root/src/yogabook_camera.py"
+grep -Fq 'framerate=30/1,colorimetry=2:4:7:1' "$root/src/yogabook_camera.py"
+grep -Fq 'card_label="Front Camera,Rear Camera"' \
+	"$root/modprobe.d/yogabook-camera.conf"
+grep -Fq "for specification in '10:Front Camera' '11:Rear Camera'" \
+	"$root/tools/prepare-camera.sh"
+grep -Fq 'v4l2sink device={arguments.front_output_device}' "$root/src/yogabook_camera.py"
+grep -Fq 'v4l2sink device={arguments.rear_output_device}' "$root/src/yogabook_camera.py"
 grep -Fq 'keep_format=1,sustain_framerate=1,timeout=1000' \
 	"$root/src/yogabook_camera.py"
 if grep -Fq '0.824705 + 1.105571 * x + 0.423998 * y' \
@@ -152,7 +169,9 @@ fi
 grep -Fq "printf '1\\n' > /sys/module/atomisp/parameters/allow_raw_output" \
 	"$root/tools/prepare-camera.sh"
 grep -Fq 'YB1-X91L' "$root/tools/prepare-camera.sh"
-grep -Fq 'exclusive_caps=1 max_buffers=2' \
+grep -Fq 'devices=2 video_nr=10,11' \
+	"$root/modprobe.d/yogabook-camera.conf"
+grep -Fq 'exclusive_caps=1,1 max_buffers=2' \
 	"$root/modprobe.d/yogabook-camera.conf"
 grep -Fq 'dh_installsystemd --no-stop-on-upgrade yogabook-camera.service' \
 	"$root/debian/rules"

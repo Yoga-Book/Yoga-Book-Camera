@@ -42,6 +42,14 @@ The repository implementation has run continuously on the physical tablet:
   branch to 2 fps; rear processing used about 1.1 cores in a bounded run.
 - full-resolution 3248x2432 rear BGGR10 capture, one-shot focus movement and
   JPEG encoding have completed on the physical tablet;
+- the OV8858 synthetic pattern produces clean full-scale white, yellow, cyan,
+  green, magenta, red and blue bars through the raw AtomISP path;
+- a real rear frame spans the full 10-bit range after applying Lenovo's
+  production per-channel digital-gain registers; the previous near-black
+  output came from the generic driver writing a different gain block;
+- a same-frame rear color comparison selected RGB controls `0.65/0.50/0.60`
+  at gamma `2.0`, producing whole-frame means `135/133/129` instead of the
+  unity profile's green `103/139/107`; physical scene acceptance remains open;
 - repeated fixed-focus stills stabilized near 173 MB service memory rather
   than growing once per capture.
 - cold driver initialization requires `atomisp_run_mode=2` before BGGR10
@@ -53,6 +61,10 @@ The repository implementation has run continuously on the physical tablet:
 - The loopback format is locked after its first processed frame; a physical
   Chrome trace then sustained 66 successful dequeues over two seconds without
   the earlier stream-off/reopen loop or producer stall.
+- Version 0.2 exposes separate front and rear browser endpoints while keeping
+  one physical AtomISP stream. A debounced endpoint-open monitor performs the
+  sensor handoff without restarting the stable browser-facing writers;
+  physical Google Meet switching remains an acceptance gate.
 - Chromium requires capture-only loopback advertisement to enumerate the
   endpoint. The two-buffer limit also supports GStreamer consumers; the format
   lock prevents Chromium's open from stalling the producer. Package upgrades
@@ -68,8 +80,9 @@ The repository implementation has run continuously on the physical tablet:
 
 This evidence proves runtime architecture and transport, not final image
 acceptance. The front image still has visible noise and residual spatial color
-variation. The rear lens was physically covered or obstructed during the first
-continuous test and therefore has no valid scene-quality result yet.
+variation. The rear lens has now been confirmed unobstructed and the black
+output has been localized to gain programming, but a real corrected 8 MP still
+requires physical color, focus and detail acceptance.
 
 Lenovo's inspected `OV2740_CJAE533_CHT.cpf` is a 33,720-byte Intel AIQB file
 described internally as OV2740 V11 tuning dated 2015-02-02. Compatibility with
