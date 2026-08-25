@@ -155,6 +155,10 @@ grep -Fq 'v4l2sink device={arguments.front_output_device}' "$root/src/yogabook_c
 grep -Fq 'v4l2sink device={arguments.rear_output_device}' "$root/src/yogabook_camera.py"
 grep -Fq 'keep_format=1,sustain_framerate=1,timeout=1000' \
 	"$root/src/yogabook_camera.py"
+grep -Fq 'pixelformat=YUYV,field=none,colorspace=rec709,xfer=srgb' \
+	"$root/src/yogabook_camera.py"
+grep -Fq 'return int(self.pipeline_failed)' "$root/src/yogabook_camera.py"
+grep -Fq 'Restart=on-failure' "$root/systemd/yogabook-camera.service"
 if grep -Fq '0.824705 + 1.105571 * x + 0.423998 * y' \
 	"$root/src/yogabook_camera.py"; then
 	echo 'ERROR: physically rejected quadratic color surface is still enabled' >&2

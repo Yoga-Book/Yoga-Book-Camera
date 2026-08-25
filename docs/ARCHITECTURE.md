@@ -93,6 +93,14 @@ advertise video output.
 Before a planned processor stop, systemd clears `keep_format`; otherwise the
 loopback can retain capture-only state after the writer exits and reject the
 next writer even when no browser has the node open.
+At startup the processor first establishes the complete 1280x720 YUYV output
+format before constructing the expensive camera pipeline. It sets
+`keep_format` only after both producer writers are active, because locking an
+unowned `exclusive_caps` loopback would make it capture-only and reject the
+writer. This prevents PipeWire or Chromium discovery from selecting
+v4l2loopback's default BGR4 format during the boot window. Any later pipeline
+error exits nonzero so the unit's bounded `Restart=on-failure` policy can
+reconstruct the producer.
 
 The loopback writers remain open but paused when no external process holds
 either capture endpoint. After a three-second debounce, the service stops the

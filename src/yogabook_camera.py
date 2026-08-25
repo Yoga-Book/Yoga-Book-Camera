@@ -531,6 +531,26 @@ def lock_loopback_format(output_device: str) -> None:
     )
 
 
+def prepare_loopback_format(output_device: str, width: int, height: int) -> None:
+    """Establish producer caps before a desktop client can choose them."""
+    command_when_available(
+        "v4l2-ctl",
+        "-d",
+        output_device,
+        "--set-ctrl=keep_format=0",
+    )
+    command_when_available(
+        "v4l2-ctl",
+        "-d",
+        output_device,
+        (
+            f"--set-fmt-video-out=width={width},height={height},"
+            "pixelformat=YUYV,field=none,colorspace=rec709,xfer=srgb,"
+            "ycbcr=601,quantization=lim-range"
+        ),
+    )
+
+
 def is_white_balance_candidate(level: float) -> bool:
     """Exclude only clipped pixels from whole-frame white-balance feedback."""
     return 24 <= level <= 235
@@ -596,6 +616,7 @@ class CameraPipeline:
         self.still_pending = False
         self.ready_reported = False
         self.output_started = False
+        self.pipeline_failed = False
         self.streaming = False
         self.client_monitor: CameraClientMonitor | None = None
         self.activity_source_id: int | None = None
@@ -623,6 +644,8 @@ class CameraPipeline:
         processing = profile["processing"]
         output_width = int(profile["output_width"])
         output_height = int(profile["output_height"])
+        for output_device in self.output_devices.values():
+            prepare_loopback_format(output_device, output_width, output_height)
         caps = (
             f"video/x-bayer,format={profile['bayer_format']},"
             f"width={width},height={height},framerate=30/1"
@@ -1120,8 +1143,10 @@ class CameraPipeline:
         if message.type == Gst.MessageType.ERROR:
             error, debug = message.parse_error()
             print(f"ERROR: {error}\n{debug or ''}", file=sys.stderr, flush=True)
+            self.pipeline_failed = True
             self.loop.quit()
         elif message.type == Gst.MessageType.EOS and message.src == self.process:
+            self.pipeline_failed = True
             self.loop.quit()
 
     def run(self) -> int:
@@ -1156,7 +1181,7 @@ class CameraPipeline:
                 self.output_started = False
                 self.output.set_state(Gst.State.NULL)
         print(f"CAMERA_STOP frames={self.frames}", flush=True)
-        return 0
+        return int(self.pipeline_failed)
 
     def stop(self, _signal: int, _frame: object) -> None:
         self.loop.quit()

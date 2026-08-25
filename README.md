@@ -95,7 +95,13 @@ camera is the default until an application selects the rear camera.
 The browser-facing endpoints remain discoverable while unused, but the raw
 sensor, AtomISP and image-processing pipelines stop after three seconds with
 no external camera client. Opening either endpoint resumes processing. A
-thermal gate stops processing at 85 C and does not restart it until the
+service start establishes 1280x720 YUYV producer caps before desktop camera
+discovery, then locks them after both writers are active. This prevents the
+loopbacks' default BGR4 format from winning a boot-time race without turning an
+unowned `exclusive_caps` endpoint capture-only. Pipeline errors exit nonzero
+and trigger the bounded systemd restart policy instead of silently leaving
+stale camera devices. A thermal
+gate stops processing at 85 C and does not restart it until the
 hottest valid system thermal-zone reading is at or below 75 C. The systemd
 unit additionally caps the processor at 175% CPU, 384 MiB memory and 64 tasks,
 with low scheduling weight so camera work cannot monopolize the tablet.

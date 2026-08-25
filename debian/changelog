@@ -1,3 +1,16 @@
+yogabook-camera (0.2.15) unstable; urgency=medium
+
+  * Defer keep_format until both loopback producer writers are active.
+
+ -- Yoga Book Linux Project <noreply@github.com>  Tue, 25 Aug 2026 10:55:00 +0200
+
+yogabook-camera (0.2.14) unstable; urgency=medium
+
+  * Establish and lock YUYV loopback producer caps before desktop discovery.
+  * Return failure on pipeline errors so systemd retries recoverable races.
+
+ -- Yoga Book Linux Project <noreply@github.com>  Tue, 25 Aug 2026 10:35:00 +0200
+
 yogabook-camera (0.2.13) unstable; urgency=medium
 
   * Suspend raw capture and image processing while no camera client is open.

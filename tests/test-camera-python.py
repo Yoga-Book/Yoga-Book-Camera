@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from contextlib import redirect_stderr
+import io
 import os
 from pathlib import Path
 import select
@@ -12,9 +14,15 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
+import gi
+
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst
+
 from yogabook_camera import (
     CameraActivityMonitor,
     CameraClientMonitor,
+    CameraPipeline,
     CameraSelectionMonitor,
     command_when_available,
     configure_hardware,
@@ -25,6 +33,7 @@ from yogabook_camera import (
     is_white_balance_candidate,
     lock_loopback_format,
     load_config,
+    prepare_loopback_format,
     resolve_camera,
 )
 from yogabook_camera_capture import RearStillCapture
@@ -176,6 +185,46 @@ class CameraConfigurationTests(unittest.TestCase):
             "/dev/video10",
             "--set-ctrl=keep_format=1,sustain_framerate=1,timeout=1000",
         )
+
+    @patch("yogabook_camera.command_when_available")
+    def test_loopback_producer_format_is_established_before_pipeline_start(
+        self,
+        mocked_command: Mock,
+    ) -> None:
+        prepare_loopback_format("/dev/video10", 1280, 720)
+        self.assertEqual(
+            mocked_command.call_args_list,
+            [
+                unittest.mock.call(
+                    "v4l2-ctl",
+                    "-d",
+                    "/dev/video10",
+                    "--set-ctrl=keep_format=0",
+                ),
+                unittest.mock.call(
+                    "v4l2-ctl",
+                    "-d",
+                    "/dev/video10",
+                    "--set-fmt-video-out=width=1280,height=720,"
+                    "pixelformat=YUYV,field=none,colorspace=rec709,xfer=srgb,"
+                    "ycbcr=601,quantization=lim-range",
+                ),
+            ],
+        )
+
+    def test_pipeline_error_requests_failed_service_exit(self) -> None:
+        pipeline = CameraPipeline.__new__(CameraPipeline)
+        pipeline.pipeline_failed = False
+        pipeline.loop = Mock()
+        message = Mock()
+        message.type = Gst.MessageType.ERROR
+        message.parse_error.return_value = (RuntimeError("format mismatch"), "debug")
+
+        with redirect_stderr(io.StringIO()):
+            pipeline._message(Mock(), message)
+
+        self.assertTrue(pipeline.pipeline_failed)
+        pipeline.loop.quit.assert_called_once_with()
 
     def test_non_clipped_pixel_is_used_for_white_balance(self) -> None:
         self.assertTrue(is_white_balance_candidate(188.5))
