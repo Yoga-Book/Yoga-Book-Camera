@@ -24,6 +24,7 @@ from yogabook_camera import (
     CameraClientMonitor,
     CameraPipeline,
     CameraSelectionMonitor,
+    INTERVIDEO_LAST_FRAME_TIMEOUT_NS,
     command_when_available,
     configure_hardware,
     discover_sensor_subdevice,
@@ -183,8 +184,33 @@ class CameraConfigurationTests(unittest.TestCase):
             "v4l2-ctl",
             "-d",
             "/dev/video10",
-            "--set-ctrl=keep_format=1,sustain_framerate=1,timeout=1000",
+            "--set-ctrl=keep_format=1,sustain_framerate=1,timeout=0",
         )
+
+    def test_intervideo_timeout_retains_last_frame_for_one_year(self) -> None:
+        self.assertEqual(
+            INTERVIDEO_LAST_FRAME_TIMEOUT_NS,
+            365 * 24 * 60 * 60 * Gst.SECOND,
+        )
+
+    @patch("yogabook_camera.time.sleep")
+    def test_resume_waits_for_a_new_processed_timestamp(
+        self,
+        mocked_sleep: Mock,
+    ) -> None:
+        old_buffer = SimpleNamespace(pts=100)
+        new_buffer = SimpleNamespace(pts=200)
+        old_sample = Mock()
+        old_sample.get_buffer.return_value = old_buffer
+        new_sample = Mock()
+        new_sample.get_buffer.return_value = new_buffer
+        pipeline = CameraPipeline.__new__(CameraPipeline)
+        pipeline.browser_bridge = Mock()
+        pipeline.browser_bridge.get_property.side_effect = (old_sample, new_sample)
+
+        pipeline._wait_for_fresh_processed_frame(100)
+
+        mocked_sleep.assert_called_once_with(0.05)
 
     @patch("yogabook_camera.command_when_available")
     def test_loopback_producer_format_is_established_before_pipeline_start(

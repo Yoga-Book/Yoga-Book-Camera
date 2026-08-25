@@ -36,6 +36,7 @@ DEFAULT_IDLE_DELAY_SECONDS = 3.0
 DEFAULT_MAX_TEMPERATURE_CELSIUS = 85.0
 DEFAULT_RESUME_TEMPERATURE_CELSIUS = 75.0
 DEFAULT_THERMAL_ROOT = Path("/sys/class/thermal")
+INTERVIDEO_LAST_FRAME_TIMEOUT_NS = 365 * 24 * 60 * 60 * 1_000_000_000
 IN_CLOSE_WRITE = 0x00000008
 IN_CLOSE_NOWRITE = 0x00000010
 IN_OPEN = 0x00000020
@@ -522,12 +523,12 @@ def configure_hardware(
 
 
 def lock_loopback_format(output_device: str) -> None:
-    """Prevent a late browser open from reconfiguring and stalling the writer."""
+    """Lock producer caps and retain the last valid frame while idle."""
     command(
         "v4l2-ctl",
         "-d",
         output_device,
-        "--set-ctrl=keep_format=1,sustain_framerate=1,timeout=1000",
+        "--set-ctrl=keep_format=1,sustain_framerate=1,timeout=0",
     )
 
 
@@ -680,7 +681,8 @@ class CameraPipeline:
             "appsink name=statistics emit-signals=true sync=false max-buffers=1 drop=true"
         )
         self.output_description = (
-            "intervideosrc channel=yogabook-camera do-timestamp=true timeout=1000000000 ! "
+            "intervideosrc channel=yogabook-camera do-timestamp=true "
+            f"timeout={INTERVIDEO_LAST_FRAME_TIMEOUT_NS} ! "
             "videoconvert n-threads=2 ! videoscale method=bilinear n-threads=2 ! "
             f"video/x-raw,format=YUY2,width={output_width},height={output_height},"
             "framerate=30/1,colorimetry=2:4:7:1 ! "
@@ -829,6 +831,29 @@ class CameraPipeline:
         if result == Gst.StateChangeReturn.FAILURE:
             raise RuntimeError("image processing failed to enter PLAYING")
 
+    def _last_processed_timestamp(self) -> int | None:
+        sample = self.browser_bridge.get_property("last-sample")
+        if sample is None:
+            return None
+        buffer = sample.get_buffer()
+        if buffer is None:
+            return None
+        return int(buffer.pts)
+
+    def _wait_for_fresh_processed_frame(
+        self,
+        previous_timestamp: int | None,
+        timeout_seconds: float = 10.0,
+    ) -> None:
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            timestamp = self._last_processed_timestamp()
+            if timestamp is not None and timestamp != previous_timestamp:
+                return
+            if time.monotonic() >= deadline:
+                raise RuntimeError("timed out waiting for a fresh processed camera frame")
+            time.sleep(0.05)
+
     def _pause_streaming(self, reason: str) -> None:
         if not self.streaming:
             return
@@ -853,6 +878,7 @@ class CameraPipeline:
     def _resume_streaming(self, reason: str) -> None:
         if self.streaming:
             return
+        previous_timestamp = self._last_processed_timestamp()
         try:
             self.sensor_device = configure_hardware(
                 self.arguments.capture_device,
@@ -865,6 +891,7 @@ class CameraPipeline:
             }
             self._start_processing()
             self._start_capture()
+            self._wait_for_fresh_processed_frame(previous_timestamp)
             result = self.output.set_state(Gst.State.PLAYING)
             if result == Gst.StateChangeReturn.FAILURE:
                 raise RuntimeError("browser output failed to resume")
@@ -1156,11 +1183,7 @@ class CameraPipeline:
                 raise RuntimeError("physical capture pipeline is missing")
             self.capture.set_state(Gst.State.PLAYING)
             self.streaming = True
-            deadline = time.monotonic() + 10
-            while self.browser_bridge.get_property("last-sample") is None:
-                if time.monotonic() >= deadline:
-                    raise RuntimeError("timed out waiting for the first processed camera frame")
-                time.sleep(0.05)
+            self._wait_for_fresh_processed_frame(None)
             self.output.set_state(Gst.State.PLAYING)
             self.output_started = True
             self._schedule_activity_monitor(ACTIVE_POLL_INTERVAL_MS)

@@ -153,7 +153,11 @@ grep -Fq "for specification in '10:Front Camera' '11:Rear Camera'" \
 	"$root/tools/prepare-camera.sh"
 grep -Fq 'v4l2sink device={arguments.front_output_device}' "$root/src/yogabook_camera.py"
 grep -Fq 'v4l2sink device={arguments.rear_output_device}' "$root/src/yogabook_camera.py"
-grep -Fq 'keep_format=1,sustain_framerate=1,timeout=1000' \
+grep -Fq 'keep_format=1,sustain_framerate=1,timeout=0' \
+	"$root/src/yogabook_camera.py"
+grep -Fq 'INTERVIDEO_LAST_FRAME_TIMEOUT_NS = 365 * 24 * 60 * 60 * 1_000_000_000' \
+	"$root/src/yogabook_camera.py"
+grep -Fq 'self._wait_for_fresh_processed_frame(previous_timestamp)' \
 	"$root/src/yogabook_camera.py"
 grep -Fq 'pixelformat=YUYV,field=none,colorspace=rec709,xfer=srgb' \
 	"$root/src/yogabook_camera.py"

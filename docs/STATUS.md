@@ -89,6 +89,15 @@ The repository implementation has run continuously on the physical tablet:
 - Chrome fallback to the private green AtomISP YUV node is prevented by a
   device ACL boundary and an early system service that becomes ready only
   after the corrected loopback receives frames.
+- A post-idle 300-frame front-camera sample reproduced eight synthetic timeout
+  frames with exact downscaled means `R=0/G=131/B=0`. Disabling the loopback
+  timeout image eliminated all green frames in the follow-up sample. The
+  inter-video source now retains the last corrected frame across idle wakeups
+  instead of switching to its independent black timeout frame.
+- The first 0.2.16 concurrency pass then found 22 black warmup frames because
+  resuming the browser writer raced the newly restarted processing pipeline.
+  Version 0.2.17 keeps the writer paused until the processing sink exposes a
+  fresh timestamp, while the loopback repeats its previous valid frame.
 - The loopback format is locked after its first processed frame; a physical
   Chrome trace then sustained 66 successful dequeues over two seconds without
   the earlier stream-off/reopen loop or producer stall.

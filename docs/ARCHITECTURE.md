@@ -121,8 +121,16 @@ once. A debounced monitor ignores short enumeration probes and switches only
 after exactly one external camera endpoint remains open. The physical capture
 and processing pipelines are then rebuilt in place. A separate inter-video
 pipeline keeps the two browser-facing writers open and supplies a bounded
-fallback frame during the handoff, so changing the camera in a Meet call does
-not remove either device.
+last-valid-frame interval during idle wakeups and handoffs, so changing the
+camera in a Meet call does not remove either device. The loopbacks disable
+their synthetic timeout image: a measured default timeout frame was solid
+green, and publishing it during processor wakeups made remote meeting video
+flash green. The inter-video bridge retains the last corrected frame for a
+practical one-year interval instead of substituting a black frame. On every
+idle resume or sensor switch, the browser writer remains paused until the
+processor publishes a sample whose timestamp differs from the previous
+sample. The loopback therefore repeats its last valid frame during warmup and
+never receives the inter-video bridge's initial black frame.
 
 Full-resolution rear stills are requested through the running system service.
 The service pauses only its AtomISP source pipeline while keeping the

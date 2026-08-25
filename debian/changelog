@@ -1,3 +1,16 @@
+yogabook-camera (0.2.17) unstable; urgency=medium
+
+  * Gate idle resume on a fresh corrected frame to prevent black warmup video.
+
+ -- Yoga Book Linux Project <noreply@github.com>  Tue, 25 Aug 2026 09:40:00 +0200
+
+yogabook-camera (0.2.16) unstable; urgency=medium
+
+  * Retain the last corrected frame across camera idle wakeups.
+  * Disable synthetic loopback timeout frames that appeared solid green.
+
+ -- Yoga Book Linux Project <noreply@github.com>  Tue, 25 Aug 2026 09:36:00 +0200
+
 yogabook-camera (0.2.15) unstable; urgency=medium
 
   * Defer keep_format until both loopback producer writers are active.
