@@ -1,9 +1,9 @@
 #!/bin/sh
 set -e
 
-if [ "$1" = configure ] && command -v udevadm >/dev/null; then
-	udevadm control --reload-rules
-	udevadm trigger --subsystem-match=video4linux --subsystem-match=media
+if [ "$1" = configure ] && [ -S /run/udev/control ] && command -v udevadm >/dev/null; then
+	udevadm control --reload-rules || true
+	udevadm trigger --subsystem-match=video4linux --subsystem-match=media || true
 	udevadm settle --timeout=10 || true
 
 	# A udev tag change prevents new logind ACLs but does not remove an ACL

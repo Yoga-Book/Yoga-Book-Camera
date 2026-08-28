@@ -1,3 +1,9 @@
+yogabook-camera (0.2.21) unstable; urgency=medium
+
+  * Skip live udev operations when configuring an offline image or container.
+
+ -- Yoga Book Linux Project <noreply@github.com>  Fri, 28 Aug 2026 23:15:00 +0200
+
 yogabook-camera (0.2.20) unstable; urgency=medium
 
   * Reissue the upstream sensor raw-format support from its validated source
