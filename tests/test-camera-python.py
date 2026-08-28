@@ -19,6 +19,8 @@ import gi
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst
 
+Gst.init(None)
+
 from yogabook_camera import (
     CameraActivityMonitor,
     CameraClientMonitor,
@@ -34,6 +36,7 @@ from yogabook_camera import (
     is_white_balance_candidate,
     lock_loopback_format,
     load_config,
+    normalized_bayer_buffer,
     prepare_loopback_format,
     resolve_camera,
 )
@@ -42,6 +45,41 @@ from yogabook_camera_control import read_camera_state
 
 
 class CameraConfigurationTests(unittest.TestCase):
+    def test_transport_padding_is_cropped_from_bayer_buffer(self) -> None:
+        source = Gst.Buffer.new_allocate(None, 72, None)
+        source.fill(0, bytes(range(1, 73)))
+        source.pts = 123
+
+        output = normalized_bayer_buffer(
+            source,
+            width=2,
+            height=2,
+            capture_width=6,
+            capture_height=6,
+            source_stride=12,
+        )
+
+        self.assertIsNotNone(output)
+        assert output is not None
+        self.assertEqual(
+            output.extract_dup(0, output.get_size()),
+            bytes((29, 30, 31, 32, 41, 42, 43, 44)),
+        )
+        self.assertEqual(output.pts, 123)
+
+    def test_transport_crop_rejects_a_bayer_phase_change(self) -> None:
+        source = Gst.Buffer.new_allocate(None, 32, None)
+
+        with self.assertRaisesRegex(ValueError, "preserve the color phase"):
+            normalized_bayer_buffer(
+                source,
+                width=2,
+                height=2,
+                capture_width=4,
+                capture_height=4,
+                source_stride=8,
+            )
+
     def test_auto_selection_defaults_to_front(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             with patch.dict(os.environ, {"XDG_CONFIG_HOME": temporary}):

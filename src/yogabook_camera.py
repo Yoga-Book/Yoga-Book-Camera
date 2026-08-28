@@ -562,12 +562,26 @@ def normalized_bayer_buffer(
     *,
     width: int,
     height: int,
+    capture_width: int | None = None,
+    capture_height: int | None = None,
     source_stride: int,
 ) -> Gst.Buffer | None:
-    """Copy a padded AtomISP Bayer frame into GStreamer's tight layout."""
+    """Crop an AtomISP transport frame into GStreamer's tight layout."""
+    capture_width = capture_width if capture_width is not None else width
+    capture_height = capture_height if capture_height is not None else height
+    if capture_width < width or capture_height < height:
+        raise ValueError("capture dimensions are smaller than the Bayer image")
+    if source_stride < capture_width * 2:
+        raise ValueError("capture stride is smaller than the transport row")
+    crop_left = (capture_width - width) // 2
+    crop_top = (capture_height - height) // 2
+    if (capture_width - width) % 2 or (capture_height - height) % 2:
+        raise ValueError("Bayer transport padding cannot be cropped symmetrically")
+    if crop_left % 2 or crop_top % 2:
+        raise ValueError("Bayer crop offsets must preserve the color phase")
     tight_stride = width * 2
     payload_size = tight_stride * height
-    row_bytes = source_stride * height
+    row_bytes = source_stride * capture_height
     size = source.get_size()
     if size < row_bytes:
         print(
@@ -575,7 +589,7 @@ def normalized_bayer_buffer(
             file=sys.stderr,
         )
         return None
-    if source_stride == tight_stride:
+    if source_stride == tight_stride and capture_height == height:
         return source.copy_region(
             Gst.BufferCopyFlags.MEMORY
             | Gst.BufferCopyFlags.TIMESTAMPS
@@ -585,8 +599,12 @@ def normalized_bayer_buffer(
         )
 
     payload = source.extract_dup(0, row_bytes)
+    crop_offset = crop_top * source_stride + crop_left * 2
     tight_payload = b"".join(
-        payload[row * source_stride : row * source_stride + tight_stride]
+        payload[
+            (crop_offset + row * source_stride) :
+            (crop_offset + row * source_stride + tight_stride)
+        ]
         for row in range(height)
     )
     target = Gst.Buffer.new_allocate(None, payload_size, None)
@@ -729,9 +747,11 @@ class CameraPipeline:
         self._create_capture()
 
     def _capture_pipeline_description(self, profile: dict[str, Any]) -> str:
+        capture_width = profile.get("capture_width", profile["width"])
+        capture_height = profile.get("capture_height", profile["height"])
         caps = (
             f"video/x-bayer,format={profile['bayer_format']},"
-            f"width={profile['width']},height={profile['height']},framerate=30/1"
+            f"width={capture_width},height={capture_height},framerate=30/1"
         )
         return (
             f"v4l2src device={self.arguments.capture_device} io-mode=2 do-timestamp=true ! "
@@ -1033,6 +1053,8 @@ class CameraPipeline:
             source,
             width=int(self.profile["width"]),
             height=int(self.profile["height"]),
+            capture_width=int(self.profile.get("capture_width", self.profile["width"])),
+            capture_height=int(self.profile.get("capture_height", self.profile["height"])),
             source_stride=self.source_stride,
         )
 

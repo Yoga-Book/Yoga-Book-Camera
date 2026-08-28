@@ -45,11 +45,13 @@ class RearStillCapture:
         self.still = profile["still"]
         self.width = int(self.still["width"])
         self.height = int(self.still["height"])
+        self.capture_width = int(self.still.get("capture_width", self.width))
+        self.capture_height = int(self.still.get("capture_height", self.height))
         self.source_stride = int(self.still["bytes_per_line"])
         self.focus_settle_seconds = int(self.still["focus_settle_ms"]) / 1000
         caps = (
             f"video/x-bayer,format={self.still['bayer_format']},"
-            f"width={self.width},height={self.height},framerate=30/1"
+            f"width={self.capture_width},height={self.capture_height},framerate=30/1"
         )
         self.capture_description = (
             f"v4l2src device={arguments.capture_device} io-mode=2 do-timestamp=true ! "
@@ -79,6 +81,8 @@ class RearStillCapture:
                 sample.get_buffer(),
                 width=self.width,
                 height=self.height,
+                capture_width=self.capture_width,
+                capture_height=self.capture_height,
                 source_stride=self.source_stride,
             )
             if normalized is None:

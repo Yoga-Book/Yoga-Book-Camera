@@ -11,8 +11,20 @@ from typing import Any
 
 
 CAMERAS = {
-    "front": {"input": 0, "sensor": "ov2740", "size": (1920, 1080)},
-    "rear": {"input": 1, "sensor": "ov8858", "size": (1616, 1208)},
+    "front": {
+        "input": 0,
+        "sensor": "ov2740",
+        "size": (1920, 1080),
+        "capture_size": (1932, 1092),
+        "bayer_format": "grbg10le",
+    },
+    "rear": {
+        "input": 1,
+        "sensor": "ov8858",
+        "size": (1616, 1208),
+        "capture_size": (1632, 1224),
+        "bayer_format": "bggr10le",
+    },
 }
 REQUIRED_CONTROLS = ("exposure", "analogue_gain", "digital_gain")
 REQUIRED_PROCESSING = (
@@ -48,11 +60,20 @@ def validate_profile(name: str, profile: dict[str, Any]) -> None:
         (profile.get("width"), profile.get("height")) == expected["size"],
         f"{name}: incorrect streaming size",
     )
-    require(profile.get("bayer_format") == "bggr10le", f"{name}: expected BGGR10LE")
+    require(
+        profile.get("bayer_format") == expected["bayer_format"],
+        f"{name}: incorrect Bayer order",
+    )
+    require(
+        (profile.get("capture_width"), profile.get("capture_height"))
+        == expected["capture_size"],
+        f"{name}: incorrect raw transport size",
+    )
 
     width = int(profile["width"])
+    capture_width = int(profile["capture_width"])
     stride = int(profile["bytes_per_line"])
-    require(stride >= width * 2, f"{name}: Bayer stride is smaller than a row")
+    require(stride >= capture_width * 2, f"{name}: Bayer stride is smaller than a row")
     require(stride % 32 == 0, f"{name}: Bayer stride is not 32-byte aligned")
     require(profile.get("output_width") == 1280, f"{name}: output width must be 1280")
     require(profile.get("output_height") == 720, f"{name}: output height must be 720")
@@ -84,6 +105,7 @@ def validate_profile(name: str, profile: dict[str, Any]) -> None:
     require(0.0 < processing["target_blue_green"] < 2.0, f"{name}: invalid B/G target")
 
     if name == "front":
+        require(profile.get("bytes_per_line") == 4096, "front: incorrect raw transport stride")
         require(controls.get("red_balance") == 1024, "front: sensor red balance must remain at unity")
         require(controls.get("blue_balance") == 1024, "front: sensor blue balance must remain at unity")
     else:
@@ -117,6 +139,10 @@ def validate_profile(name: str, profile: dict[str, Any]) -> None:
         require(
             (still.get("width"), still.get("height")) == (3248, 2432),
             "rear: full-resolution still size must be 3248x2432",
+        )
+        require(
+            (still.get("capture_width"), still.get("capture_height")) == (3264, 2448),
+            "rear: incorrect full-resolution raw transport size",
         )
         require(still.get("bytes_per_line") == 6656, "rear: incorrect full-resolution stride")
         require(still.get("bayer_format") == "bggr10le", "rear: still must use BGGR10LE")

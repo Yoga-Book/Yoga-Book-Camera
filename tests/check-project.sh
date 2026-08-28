@@ -4,7 +4,8 @@
 set -Eeuo pipefail
 
 root=${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
-temporary_directory=$(mktemp -d /tmp/yogabook-camera-test.XXXXXX)
+temporary_root=${TMPDIR:-/tmp}
+temporary_directory=$(mktemp -d "$temporary_root/yogabook-camera-test.XXXXXX")
 
 cleanup() {
 	rm -rf -- "$temporary_directory"
@@ -179,13 +180,12 @@ if grep -Fq 'Yoga Book Camera' "$root/udev/72-yogabook-camera-private.rules"; th
 	echo 'ERROR: private-device rule must not match the corrected loopback' >&2
 	exit 1
 fi
-if grep -Fq 'options atomisp allow_raw_output=1' \
-	"$root/modprobe.d/yogabook-camera.conf"; then
-	echo 'ERROR: raw AtomISP output must not be enabled before DMI gating' >&2
+if grep -Fq 'allow_raw_output' \
+	"$root/modprobe.d/yogabook-camera.conf" \
+	"$root/tools/prepare-camera.sh"; then
+	echo 'ERROR: obsolete AtomISP raw-output gate is still referenced' >&2
 	exit 1
 fi
-grep -Fq "printf '1\\n' > /sys/module/atomisp/parameters/allow_raw_output" \
-	"$root/tools/prepare-camera.sh"
 grep -Fq 'YB1-X91L' "$root/tools/prepare-camera.sh"
 grep -Fq 'devices=2 video_nr=10,11' \
 	"$root/modprobe.d/yogabook-camera.conf"

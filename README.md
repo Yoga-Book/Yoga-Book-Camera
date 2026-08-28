@@ -12,7 +12,7 @@ sensor and does not substitute for the front camera.
 The project contains an experimental raw Bayer userspace ISP and Debian
 package. On the physical YB1-X91L it has proven:
 
-- continuous front OV2740 BGGR10 capture and 1280x720 browser output;
+- continuous front OV2740 GRBG10 capture and 1280x720 browser output;
 - continuous rear OV8858 BGGR10 capture with per-row stride removal;
 - automatic sensor exposure/gain and userspace white balance convergence;
 - GPU color-shading correction and temporal/spatial denoising;
@@ -85,8 +85,9 @@ make package
 
 ## Runtime
 
-The package deliberately enables AtomISP raw output only on a DMI-matched
-YB1-X91L and exposes `Front Camera` and `Rear Camera`.
+The package prepares camera integration only on a DMI-matched YB1-X91L and
+consumes the sensor-matched raw formats exposed by AtomISP. It exposes
+`Front Camera` and `Rear Camera` without changing a kernel module parameter.
 Choose either device directly in Google Meet, Chromium or another V4L2 camera
 application. The service observes which endpoint the application keeps open
 and switches the single physical AtomISP pipeline automatically. The front

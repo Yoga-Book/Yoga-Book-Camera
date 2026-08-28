@@ -27,7 +27,7 @@ reference image itself is private test data and is not committed.
 
 Tune in this order so one feedback loop does not conceal another problem:
 
-1. Confirm BGGR10 transport, dimensions, row stride and Bayer order with the
+1. Confirm sensor-matched Bayer10 transport, dimensions, row stride and Bayer order with the
    sensor test pattern.
 2. Keep sensor red and blue balance at unity. Establish black level and remove
    clipped or defective pixels from statistics.

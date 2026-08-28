@@ -47,10 +47,13 @@ dummy driver performs no capture, 3A, tuning or image processing.
 ## Delivery stages
 
 1. Preserve the proven OV2740 transport changes in the kernel repository.
-2. Normalize AtomISP buffer padding in userspace. OV2740 has 2,048 bytes of
-   tail padding; OV8858 1616x1208 additionally uses a 3,328-byte row stride.
-3. Demosaic BGGR10 with GStreamer's Bayer converter and scale meeting output
-   to 1280x720.
+2. Capture the complete AtomISP raw transport frame and crop its sensor
+   margins in userspace. OV2740 exposes 1932x1092 SGRBG10 for a centered
+   1920x1080 image. OV8858 exposes 1632x1224 for a 1616x1208 preview and
+   3264x2448 for a
+   3248x2432 still. Normalize the aligned row stride at the same boundary.
+3. Demosaic the front GRBG10 or rear BGGR10 stream with GStreamer's Bayer
+   converter and scale meeting output to 1280x720.
 4. Drive standard sensor exposure/gain controls from downscaled output
    statistics. Keep sensor RGB gains at unity and own white balance in one
    userspace stage so exposure changes cannot silently alter color.
@@ -64,8 +67,8 @@ dummy driver performs no capture, 3A, tuning or image processing.
 ## Runtime data flow
 
 ```text
-/dev/video0 BGGR10
-  -> padding/stride normalization
+/dev/video0 sensor-matched Bayer10
+  -> centered crop + stride normalization
   -> bayer2rgb
   -> 1280x720 RGBA
   -> color balance + hqdn3d + GLSL shading matrix

@@ -16,8 +16,8 @@ meetings.
 ## Proven transport
 
 - OV2740 uses a 576 Mbps two-lane link (288 MHz link frequency).
-- The vendor mode produces BGGR10 and requires 12x12 input padding to expose
-  1920x1080.
+- The vendor mode produces a full 1932x1092 SGRBG10 transport. Userspace
+  removes six pixels from each edge to preserve the Bayer phase at 1920x1080.
 - AtomISP normal-dequeue streaming has produced complete 1920x1080 YU12 frames
   at approximately 30 fps without kernel errors.
 - AtomISP's poll path is unsupported; a `--stream-poll` timeout is not evidence
@@ -29,15 +29,17 @@ not duplicated here.
 ## Latest kernel/runtime validation
 
 The latest device-side validation used kernel
-`7.2.0-yogabook-20260824-202716`, built from integration commit
-`1386a134231e9f9295027accc9c0d005c0344e9a`. On the physical YB1-X91L:
+`7.2.0-yogabook-20260828-163827`, built from integration commit
+`907805589733fd2e9112118314ac811361afdcd2`. On the physical YB1-X91L:
 
 - OV2740 and OV8858 both bound to their sensor drivers;
-- the front link reported 288 MHz and the required 12x12 input padding;
+- the front link reported 288 MHz and the full 1932x1092 SGRBG10 frame;
 - OV2740 exposed red- and blue-balance controls;
 - OV8858 exposed digital gain from 1024 through 4095;
-- both `Front Camera` and `Rear Camera` completed bounded 30-frame opens;
+- `Rear Camera` completed a bounded 90-frame open, followed by an automatic
+  switch to a bounded 150-frame `Front Camera` open;
 - sustained service operation produced no new AtomISP or CSS error.
+- both physical images and switching were accepted in Cheese.
 
 That kernel was validated as a one-shot boot; recording its package and source
 identity does not make it the persistent boot default. The kernel/userspace
@@ -48,9 +50,10 @@ interface and provenance boundary are specified in
 
 The repository implementation has run continuously on the physical tablet:
 
-- OV2740: 1920x1080 BGGR10 input to 1280x720 YUYV loopback output;
-- OV8858: 1616x1208 BGGR10 input with 3,328-byte row-stride normalization to
-  1280x720 YUYV loopback output;
+- OV2740: 1932x1092 SGRBG10 transport center-cropped to 1920x1080, then
+  converted to the 1280x720 YUYV loopback output;
+- OV8858: 1632x1224 BGGR10 transport cropped to 1616x1208 with 3,328-byte
+  row-stride normalization, then converted to 1280x720 YUYV;
 - sensor-domain auto exposure converged from a clipped bright-room start to
   70th-percentile luma near 0.55;
 - grey-world AWB converged to the warm-neutral reference ratios
@@ -141,6 +144,5 @@ experiment reached an invalid ISP parameter path and divided by zero while
 starting the CSS stream. Reopening private controls requires per-command ABI
 analysis, bounded validation and a recoverable one-shot boot.
 
-Raw output remains behind the kernel's default-off `allow_raw_output` gate.
-Only this DMI-scoped package deliberately enables it; AtomISP private ISP
-ioctls remain closed.
+Raw formats are limited to the active sensor media-bus format and require no
+module parameter. AtomISP private ISP ioctls remain closed.

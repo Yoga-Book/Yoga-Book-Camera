@@ -15,10 +15,10 @@ survives rebases and upstream integration:
 | --- | --- |
 | Yoga Book ACPI matching | Bind `OVTI2740` to OV2740 and `INT3477` to OV8858. |
 | Firmware endpoint completion | Describe the front two-lane and rear four-lane CSI-2 links and associate the rear WV517S actuator. |
-| Front transport geometry | Select the OV2740 288 MHz link frequency and expose its 1932x1092 BGGR10 transport as 1920x1080 using 12x12 padding. |
+| Front transport geometry | Select the OV2740 288 MHz link frequency and expose its full 1932x1092 SGRBG10 transport. Userspace owns the centered 1920x1080 crop. |
 | Front color controls | Expose digital gain plus standard red- and blue-balance controls, with group-held channel updates. |
 | Rear clock and gain setup | Apply the 19.2 MHz Cherry Trail mode overrides and expose the OV8858 1x-to-4x per-channel digital-gain range. |
-| Opt-in raw capture | Provide AtomISP's `allow_raw_output` module parameter, disabled by default, and enumerate only the raw format matching the active sensor media-bus code. |
+| Raw capture | Enumerate only the raw format matching the active sensor media-bus code. Raw formats are available without a module parameter. |
 | Rear focus | Expose the WV517S standard absolute-focus control for full-resolution rear stills. This is not required for front preview. |
 
 The corresponding Linux changes are maintained on the
@@ -29,13 +29,10 @@ has a publishable provenance reference and appropriate maintainer coverage.
 
 ## Runtime policy
 
-Raw output is deliberately default-off in the kernel. The package's early
-system service checks the DMI product name for `YB1-X91L`, verifies that the
-kernel gate exists, and only then enables:
-
-```text
-/sys/module/atomisp/parameters/allow_raw_output
-```
+The package's early system service checks the DMI product name for
+`YB1-X91L` before preparing the camera devices. AtomISP exposes a raw format
+only when it matches the active sensor media-bus code; there is no runtime raw
+output gate or module parameter.
 
 The package expects an AtomISP media graph containing entities named
 `ov2740`, `ov8858` and `Atom ISP`. Runtime code resolves sensor subdevices by
@@ -43,8 +40,8 @@ media-entity name; it does not depend on a fixed subdevice number. The current
 physical capture and media-controller defaults are `/dev/video0` and
 `/dev/media0`.
 
-Only one physical sensor can stream at a time. The service converts the active
-BGGR10 stream and keeps two V4L2 loopback outputs available:
+Only one physical sensor can stream at a time. The service converts the front
+SGRBG10 or rear SBGGR10 stream and keeps two V4L2 loopback outputs available:
 
 - `/dev/video10`: `Front Camera`;
 - `/dev/video11`: `Rear Camera`.
@@ -73,8 +70,8 @@ After installing a compatible kernel and this package, collect at least:
 
 ```bash
 uname -r
-cat /sys/module/atomisp/parameters/allow_raw_output
 media-ctl -p -d /dev/media0
+v4l2-ctl -d /dev/video0 --list-formats-ext
 v4l2-ctl -d /dev/video10 --all
 v4l2-ctl -d /dev/video11 --all
 systemctl --no-pager status yogabook-camera.service

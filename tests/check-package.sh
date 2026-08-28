@@ -9,7 +9,8 @@ package=${1:?usage: check-package.sh PACKAGE.deb}
 	exit 1
 }
 
-temporary_directory=$(mktemp -d /tmp/yogabook-camera-package.XXXXXX)
+temporary_root=${TMPDIR:-/tmp}
+temporary_directory=$(mktemp -d "$temporary_root/yogabook-camera-package.XXXXXX")
 cleanup() {
 	rm -rf -- "$temporary_directory"
 }

@@ -8,7 +8,7 @@ image-quality acceptance.
 
 - `make test` and `make package` pass from a clean checkout.
 - The package installs, upgrades and removes without maintainer-script errors.
-- DMI gating prevents raw AtomISP enablement on any other product.
+- DMI gating prevents Yoga Book camera preparation on any other product.
 - The front and rear sensors are discovered by media entity name rather than a
   fixed subdevice number.
 - Front and rear direct streams run without short frames, GStreamer errors,

@@ -40,16 +40,6 @@ if command -v v4l2loopback-ctl >/dev/null; then
 	udevadm settle --timeout=5 || true
 fi
 
-if [[ ! -e /sys/module/atomisp/parameters/allow_raw_output ]]; then
-	modprobe atomisp allow_raw_output=1
-fi
-
-[[ -e /sys/module/atomisp/parameters/allow_raw_output ]] || {
-	echo 'ERROR: AtomISP raw-output gate is missing; install the Yoga Book kernel' >&2
-	exit 1
-}
-printf '1\n' > /sys/module/atomisp/parameters/allow_raw_output
-
 for _attempt in {1..30}; do
 	[[ -e /dev/video0 && -e /dev/media0 ]] && break
 	sleep 1
