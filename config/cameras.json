@@ -8,7 +8,11 @@
     "capture_width": 1932,
     "capture_height": 1092,
     "bytes_per_line": 4096,
-    "bayer_format": "grbg10le",
+    "bayer_format": "bggr10le",
+    "kernel_bayer_formats": {
+      "BG10": "bggr10le",
+      "BA10": "grbg10le"
+    },
     "output_width": 1280,
     "output_height": 720,
     "sensor_controls": {
@@ -47,6 +51,9 @@
     "capture_height": 1224,
     "bytes_per_line": 3328,
     "bayer_format": "bggr10le",
+    "kernel_bayer_formats": {
+      "BG10": "bggr10le"
+    },
     "output_width": 1280,
     "output_height": 720,
     "sensor_controls": {

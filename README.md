@@ -12,7 +12,8 @@ sensor and does not substitute for the front camera.
 The project contains an experimental raw Bayer userspace ISP and Debian
 package. On the physical YB1-X91L it has proven:
 
-- continuous front OV2740 GRBG10 capture and 1280x720 browser output;
+- continuous front OV2740 Bayer10 capture and 1280x720 browser output, with
+  runtime negotiation of the current BGGR10 and previous GRBG10 kernel ABIs;
 - continuous rear OV8858 BGGR10 capture with per-row stride removal;
 - automatic sensor exposure/gain and userspace white balance convergence;
 - GPU color-shading correction and temporal/spatial denoising;

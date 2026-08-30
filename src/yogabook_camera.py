@@ -522,6 +522,35 @@ def configure_hardware(
     return sensor_device
 
 
+def resolve_profile_bayer_format(
+    capture_device: str,
+    profile: dict[str, Any],
+) -> dict[str, Any]:
+    """Bind the userspace Bayer caps to the format exposed by the kernel."""
+    mappings = profile.get("kernel_bayer_formats")
+    if not isinstance(mappings, dict) or not mappings:
+        raise RuntimeError("camera profile has no kernel Bayer format mapping")
+    listing = command(
+        "v4l2-ctl",
+        "-d",
+        capture_device,
+        "--list-formats-ext",
+    ).stdout
+    enumerated = set(re.findall(r"\[\d+\]: '([^']{4})'", listing))
+    for fourcc, bayer_format in mappings.items():
+        if fourcc in enumerated:
+            resolved = dict(profile)
+            resolved["bayer_format"] = bayer_format
+            print(
+                f"CAMERA_FORMAT fourcc={fourcc} bayer={bayer_format}",
+                flush=True,
+            )
+            return resolved
+    expected = ",".join(mappings)
+    actual = ",".join(sorted(enumerated)) or "none"
+    raise RuntimeError(f"camera raw format mismatch: expected={expected} actual={actual}")
+
+
 def lock_loopback_format(output_device: str) -> None:
     """Lock producer caps and retain the last valid frame while idle."""
     command(
@@ -936,6 +965,15 @@ class CameraPipeline:
         try:
             if was_streaming:
                 self._pause_streaming("switching camera")
+            self.sensor_device = configure_hardware(
+                self.arguments.capture_device,
+                self.arguments.media_device,
+                profile,
+            )
+            profile = resolve_profile_bayer_format(
+                self.arguments.capture_device,
+                profile,
+            )
             self._apply_profile(camera, profile)
             if was_streaming:
                 self._resume_streaming("camera switched")
@@ -1308,6 +1346,7 @@ def main() -> int:
     os.environ.setdefault("GST_GL_API", "gles2")
     Gst.init(None)
     sensor_device = configure_hardware(arguments.capture_device, arguments.media_device, profile)
+    profile = resolve_profile_bayer_format(arguments.capture_device, profile)
     pipeline = CameraPipeline(arguments, profile, sensor_device)
     for signum in (signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, pipeline.stop)

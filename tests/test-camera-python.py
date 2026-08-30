@@ -39,6 +39,7 @@ from yogabook_camera import (
     normalized_bayer_buffer,
     prepare_loopback_format,
     resolve_camera,
+    resolve_profile_bayer_format,
 )
 from yogabook_camera_capture import RearStillCapture
 from yogabook_camera_control import read_camera_state
@@ -211,6 +212,54 @@ class CameraConfigurationTests(unittest.TestCase):
             "/dev/v4l-subdev3",
             "--set-ctrl=atomisp_run_mode=2",
         )
+
+    @patch("yogabook_camera.command")
+    def test_current_front_kernel_selects_bggr(self, mocked_command: Mock) -> None:
+        mocked_command.return_value = SimpleNamespace(
+            stdout="[9]: 'BG10' (10-bit Bayer BGBG/GRGR)\n"
+        )
+        profile = {
+            "bayer_format": "bggr10le",
+            "kernel_bayer_formats": {
+                "BG10": "bggr10le",
+                "BA10": "grbg10le",
+            },
+        }
+
+        resolved = resolve_profile_bayer_format("/dev/video0", profile)
+
+        self.assertEqual(resolved["bayer_format"], "bggr10le")
+        self.assertIsNot(resolved, profile)
+
+    @patch("yogabook_camera.command")
+    def test_fallback_front_kernel_selects_grbg(self, mocked_command: Mock) -> None:
+        mocked_command.return_value = SimpleNamespace(
+            stdout="[9]: 'BA10' (10-bit Bayer GRGR/BGBG)\n"
+        )
+        profile = {
+            "bayer_format": "bggr10le",
+            "kernel_bayer_formats": {
+                "BG10": "bggr10le",
+                "BA10": "grbg10le",
+            },
+        }
+
+        resolved = resolve_profile_bayer_format("/dev/video0", profile)
+
+        self.assertEqual(resolved["bayer_format"], "grbg10le")
+
+    @patch("yogabook_camera.command")
+    def test_unknown_front_kernel_format_is_rejected(self, mocked_command: Mock) -> None:
+        mocked_command.return_value = SimpleNamespace(stdout="[9]: 'RG10'\n")
+        profile = {
+            "kernel_bayer_formats": {
+                "BG10": "bggr10le",
+                "BA10": "grbg10le",
+            }
+        }
+
+        with self.assertRaisesRegex(RuntimeError, "expected=BG10,BA10 actual=RG10"):
+            resolve_profile_bayer_format("/dev/video0", profile)
 
     @patch("yogabook_camera.command")
     def test_loopback_format_is_locked_for_late_browser_open(

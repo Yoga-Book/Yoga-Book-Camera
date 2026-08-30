@@ -1,3 +1,12 @@
+yogabook-camera (0.2.22) unstable; urgency=medium
+
+  * Negotiate the front Bayer caps from the raw FourCC exposed by AtomISP.
+  * Support the current BG10/SBGGR10 kernel contract and the previous
+    BA10/SGRBG10 fallback without silently selecting the wrong color phase.
+  * Fail closed when the running kernel exposes an unknown raw format.
+
+ -- Yoga Book Linux Project <noreply@github.com>  Sun, 30 Aug 2026 16:30:00 +0200
+
 yogabook-camera (0.2.21) unstable; urgency=medium
 
   * Skip live udev operations when configuring an offline image or container.

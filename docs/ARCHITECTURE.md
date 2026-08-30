@@ -48,11 +48,12 @@ dummy driver performs no capture, 3A, tuning or image processing.
 
 1. Preserve the proven OV2740 transport changes in the kernel repository.
 2. Capture the complete AtomISP raw transport frame and crop its sensor
-   margins in userspace. OV2740 exposes 1932x1092 SGRBG10 for a centered
-   1920x1080 image. OV8858 exposes 1632x1224 for a 1616x1208 preview and
-   3264x2448 for a
+   margins in userspace. The current OV2740 Yoga Book mode exposes
+   1932x1092 SBGGR10 for a centered 1920x1080 image; the package also
+   negotiates the earlier SGRBG10 fallback ABI. OV8858 exposes 1632x1224 for
+   a 1616x1208 preview and 3264x2448 for a
    3248x2432 still. Normalize the aligned row stride at the same boundary.
-3. Demosaic the front GRBG10 or rear BGGR10 stream with GStreamer's Bayer
+3. Demosaic the selected sensor-matched Bayer10 stream with GStreamer's Bayer
    converter and scale meeting output to 1280x720.
 4. Drive standard sensor exposure/gain controls from downscaled output
    statistics. Keep sensor RGB gains at unity and own white balance in one

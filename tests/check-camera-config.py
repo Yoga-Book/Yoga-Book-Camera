@@ -16,7 +16,11 @@ CAMERAS = {
         "sensor": "ov2740",
         "size": (1920, 1080),
         "capture_size": (1932, 1092),
-        "bayer_format": "grbg10le",
+        "bayer_format": "bggr10le",
+        "kernel_bayer_formats": {
+            "BG10": "bggr10le",
+            "BA10": "grbg10le",
+        },
     },
     "rear": {
         "input": 1,
@@ -24,6 +28,7 @@ CAMERAS = {
         "size": (1616, 1208),
         "capture_size": (1632, 1224),
         "bayer_format": "bggr10le",
+        "kernel_bayer_formats": {"BG10": "bggr10le"},
     },
 }
 REQUIRED_CONTROLS = ("exposure", "analogue_gain", "digital_gain")
@@ -63,6 +68,10 @@ def validate_profile(name: str, profile: dict[str, Any]) -> None:
     require(
         profile.get("bayer_format") == expected["bayer_format"],
         f"{name}: incorrect Bayer order",
+    )
+    require(
+        profile.get("kernel_bayer_formats") == expected["kernel_bayer_formats"],
+        f"{name}: incorrect kernel Bayer format mapping",
     )
     require(
         (profile.get("capture_width"), profile.get("capture_height"))

@@ -15,7 +15,7 @@ survives rebases and upstream integration:
 | --- | --- |
 | Yoga Book ACPI matching | Bind `OVTI2740` to OV2740 and `INT3477` to OV8858. |
 | Firmware endpoint completion | Describe the front two-lane and rear four-lane CSI-2 links and associate the rear WV517S actuator. |
-| Front transport geometry | Select the OV2740 288 MHz link frequency and expose its full 1932x1092 SGRBG10 transport. Userspace owns the centered 1920x1080 crop. |
+| Front transport geometry | Select the OV2740 288 MHz link frequency and expose its full 1932x1092 sensor-matched SBGGR10 transport. Userspace owns the centered 1920x1080 crop and accepts the earlier SGRBG10 fallback ABI. |
 | Front color controls | Expose digital gain plus standard red- and blue-balance controls, with group-held channel updates. |
 | Rear clock and gain setup | Apply the 19.2 MHz Cherry Trail mode overrides and expose the OV8858 1x-to-4x per-channel digital-gain range. |
 | Raw capture | Enumerate only the raw format matching the active sensor media-bus code. Raw formats are available without a module parameter. |
@@ -41,7 +41,8 @@ physical capture and media-controller defaults are `/dev/video0` and
 `/dev/media0`.
 
 Only one physical sensor can stream at a time. The service converts the front
-SGRBG10 or rear SBGGR10 stream and keeps two V4L2 loopback outputs available:
+sensor-matched SBGGR10/SGRBG10 or rear SBGGR10 stream and keeps two V4L2
+loopback outputs available:
 
 - `/dev/video10`: `Front Camera`;
 - `/dev/video11`: `Rear Camera`.

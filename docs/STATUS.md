@@ -16,7 +16,9 @@ meetings.
 ## Proven transport
 
 - OV2740 uses a 576 Mbps two-lane link (288 MHz link frequency).
-- The vendor mode produces a full 1932x1092 SGRBG10 transport. Userspace
+- The current reviewed Yoga Book mode produces a full 1932x1092 SBGGR10
+  transport. The package negotiates that BG10 ABI and the earlier BA10/SGRBG10
+  integration fallback. Userspace
   removes six pixels from each edge to preserve the Bayer phase at 1920x1080.
 - AtomISP normal-dequeue streaming has produced complete 1920x1080 YU12 frames
   at approximately 30 fps without kernel errors.
@@ -33,7 +35,7 @@ The latest device-side validation used kernel
 `907805589733fd2e9112118314ac811361afdcd2`. On the physical YB1-X91L:
 
 - OV2740 and OV8858 both bound to their sensor drivers;
-- the front link reported 288 MHz and the full 1932x1092 SGRBG10 frame;
+- the front link reported 288 MHz and the full 1932x1092 Bayer10 frame;
 - OV2740 exposed red- and blue-balance controls;
 - OV8858 exposed digital gain from 1024 through 4095;
 - `Rear Camera` completed a bounded 90-frame open, followed by an automatic
@@ -50,7 +52,8 @@ interface and provenance boundary are specified in
 
 The repository implementation has run continuously on the physical tablet:
 
-- OV2740: 1932x1092 SGRBG10 transport center-cropped to 1920x1080, then
+- OV2740: 1932x1092 sensor-matched Bayer10 transport (current SBGGR10 or
+  earlier SGRBG10 fallback) center-cropped to 1920x1080, then
   converted to the 1280x720 YUYV loopback output;
 - OV8858: 1632x1224 BGGR10 transport cropped to 1616x1208 with 3,328-byte
   row-stride normalization, then converted to 1280x720 YUYV;
